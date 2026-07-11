@@ -107,7 +107,6 @@ app.post('/api/search', async (req, res) => {
 
     const page = await browser.newPage();
 
-    // Bloqueia imagens, CSS e fontes pra economizar memória
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       const type = req.resourceType();
@@ -120,151 +119,99 @@ app.post('/api/search', async (req, res) => {
 
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36');
 
+    // ===== LOGIN VIA OAUTH SIMPLIFICADO =====
     console.log('[login] acessando outlook...');
-    await page.goto('https://login.live.com/', { waitUntil: 'networkidle2', timeout: 30000 });
-    await new Promise(r => setTimeout(r, 2000));
 
-    const emailSelectors = [
-      'input[type="email"]',
-      'input[name="loginfmt"]',
-      '#i0116',
-      '#usernameInput'
-    ];
+    // Vai direto pro Outlook com parâmetro de login
+    const emailEncoded = encodeURIComponent(config.email);
+    await page.goto('https://outlook.live.com/owa/', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    });
+    await new Promise(r => setTimeout(r, 3000));
 
-    let emailInput = null;
-    for (const sel of emailSelectors) {
-      try {
-        emailInput = await page.waitForSelector(sel, { timeout: 5000 });
-        if (emailInput) {
-          console.log('[login] seletor email: ' + sel);
-          break;
-        }
-      } catch(e) {}
-    }
+    // Verifica se já está logado ou precisa logar
+    const currentUrl = page.url();
 
-    if (!emailInput) {
-      emailInput = await page.waitForSelector('input[placeholder*="email"], input[placeholder*="Email"], input[placeholder*="conta"]', { timeout: 5000 }).catch(() => null);
-    }
+    if (currentUrl.includes('login')) {
+      // Precisa fazer login
+      console.log('[login] página de login detectada');
 
-    if (!emailInput) {
-      await browser.close();
-      return res.json({ error: 'Não foi possível encontrar o campo de email no Outlook. Tente novamente.' });
-    }
-
-    await emailInput.click({ clickCount: 3 });
-    await emailInput.type(config.email, { delay: 60 });
-    console.log('[login] email preenchido');
-
-    await page.keyboard.press('Enter');
-    await new Promise(r => setTimeout(r, 2000));
-
-    const submitSelectors = [
-      'input[type="submit"]',
-      'button[type="submit"]',
-      '#idSIButton9'
-    ];
-
-    for (const sel of submitSelectors) {
-      try {
-        const btn = await page.$(sel);
-        if (btn) {
-          await btn.click();
+      // Email
+      let emailDone = false;
+      for (let attempt = 0; attempt < 5 && !emailDone; attempt++) {
+        const input = await page.$('input[type="email"], input[name="loginfmt"], #i0116').catch(() => null);
+        if (input) {
+          await input.click({ clickCount: 3 });
+          await input.type(config.email, { delay: 30 });
+          await page.keyboard.press('Enter');
+          await new Promise(r => setTimeout(r, 3000));
+          emailDone = true;
+        } else {
           await new Promise(r => setTimeout(r, 2000));
-          break;
         }
-      } catch(e) {}
-    }
+      }
 
-    const passSelectors = [
-      'input[type="password"]',
-      'input[name="passwd"]',
-      '#i0118',
-      '#passwordInput'
-    ];
+      if (!emailDone) {
+        await browser.close();
+        return res.json({ error: 'Não foi possível encontrar o campo de email.' });
+      }
 
-    let passInput = null;
-    for (const sel of passSelectors) {
-      try {
-        passInput = await page.waitForSelector(sel, { timeout: 15000 });
-        if (passInput) {
-          console.log('[login] seletor senha: ' + sel);
-          break;
+      console.log('[login] email preenchido');
+
+      // Senha
+      let passDone = false;
+      for (let attempt = 0; attempt < 5 && !passDone; attempt++) {
+        const input = await page.$('input[type="password"], input[name="passwd"], #i0118').catch(() => null);
+        if (input) {
+          await input.click({ clickCount: 3 });
+          await input.type(config.senha, { delay: 30 });
+          await page.keyboard.press('Enter');
+          await new Promise(r => setTimeout(r, 3000));
+          passDone = true;
+        } else {
+          await new Promise(r => setTimeout(r, 2000));
         }
-      } catch(e) {}
-    }
+      }
 
-    if (passInput) {
-      await passInput.click({ clickCount: 3 });
-      await passInput.type(config.senha, { delay: 60 });
       console.log('[login] senha preenchida');
-      await page.keyboard.press('Enter');
-      await new Promise(r => setTimeout(r, 2000));
 
-      for (const sel of submitSelectors) {
-        try {
-          const btn = await page.$(sel);
-          if (btn) {
-            await btn.click();
-            await new Promise(r => setTimeout(r, 2000));
-            break;
-          }
-        } catch(e) {}
+      // Stay signed in
+      await new Promise(r => setTimeout(r, 2000));
+      const stayBtn = await page.$('input[type="submit"], #idSIButton9, button[type="submit"]').catch(() => null);
+      if (stayBtn) {
+        await stayBtn.click();
+        await new Promise(r => setTimeout(r, 3000));
       }
+    } else {
+      console.log('[login] já estava logado ou login via cookie');
     }
 
-    try {
-      const staySelectors = [
-        'input[type="submit"]',
-        '#idSIButton9',
-        'button[type="submit"]'
-      ];
-      for (const sel of staySelectors) {
-        try {
-          const btn = await page.$(sel);
-          if (btn) {
-            await btn.click();
-            await new Promise(r => setTimeout(r, 2000));
-            break;
-          }
-        } catch(e) {}
-      }
-    } catch(e) {}
-
-    console.log('[login] aguardando inbox...');
-    await page.goto('https://outlook.live.com/mail/0/', { waitUntil: 'networkidle2', timeout: 30000 });
+    // Navega pra inbox
+    console.log('[login] abrindo inbox...');
+    await page.goto('https://outlook.live.com/mail/0/inbox', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    });
     await new Promise(r => setTimeout(r, 4000));
 
+    // ===== BUSCAR EMAIL NETFLIX =====
     let found = false;
-    const itemSelectors = [
-      '[role="main"] [role="option"]',
-      '[role="main"] [role="listitem"]',
-      '[role="main"] div[data-convid]',
-      '.lvHighlightAllClass'
-    ];
+    const items = await page.$$('[role="main"] [role="option"], [role="main"] div[data-convid], .lvHighlightAllClass, [role="listitem"]');
 
-    let items = [];
-    for (const sel of itemSelectors) {
-      items = await page.$$(sel);
-      if (items.length > 0) {
-        console.log('[search] seletor itens: ' + sel + ' (' + items.length + ' emails)');
-        break;
-      }
-    }
-
-    if (items.length === 0) {
-      await browser.close();
-      return res.json({ error: 'Não foi possível carregar a caixa de entrada. Tente novamente.' });
-    }
+    console.log('[search] ' + items.length + ' itens encontrados');
 
     for (let i = 0; i < Math.min(items.length, 20); i++) {
-      const text = await items[i].evaluate(el => el.textContent);
-      if (text.toLowerCase().includes('netflix')) {
-        console.log('[search] netflix encontrado na posicao ' + i);
-        await items[i].click();
-        await new Promise(r => setTimeout(r, 3000));
-        found = true;
-        break;
-      }
+      try {
+        const text = await items[i].evaluate(el => el.textContent || '');
+        if (text.toLowerCase().includes('netflix')) {
+          console.log('[search] netflix encontrado na posicao ' + i);
+          await items[i].click();
+          await new Promise(r => setTimeout(r, 3000));
+          found = true;
+          break;
+        }
+      } catch(e) {}
     }
 
     if (!found) {
@@ -272,6 +219,7 @@ app.post('/api/search', async (req, res) => {
       return res.json({ error: 'Nenhum email da Netflix encontrado na caixa de entrada' });
     }
 
+    // ===== LER CONTEÚDO =====
     await new Promise(r => setTimeout(r, 2000));
     const emailBody = await page.evaluate(() => {
       const doc = document.querySelector('[role="document"]');
@@ -282,6 +230,7 @@ app.post('/api/search', async (req, res) => {
 
     console.log('[email] corpo lido, ' + emailBody.length + ' caracteres');
 
+    // ===== EXTRAIR =====
     let result = null;
 
     if (svc.type === 'code') {
@@ -304,21 +253,15 @@ app.post('/api/search', async (req, res) => {
       try {
         const links = await page.$$eval('a', (els, clickText) => {
           for (const el of els) {
-            if (el.textContent.trim().includes(clickText) && el.href) {
-              return el.href;
-            }
+            if (el.textContent.trim().includes(clickText) && el.href) return el.href;
           }
           for (const el of els) {
-            if (el.href && el.href.includes('netflix.com')) {
-              return el.href;
-            }
+            if (el.href && el.href.includes('netflix.com')) return el.href;
           }
           return null;
         }, svc.clickText);
 
-        if (links) {
-          result = links;
-        }
+        if (links) result = links;
       } catch(e) {}
 
       if (!result) {
@@ -333,7 +276,7 @@ app.post('/api/search', async (req, res) => {
     if (result) {
       res.json({ found: true, result, service: svc.label });
     } else {
-      res.json({ error: 'Não foi possível extrair o código/link. O email pode estar em formato diferente do esperado.' });
+      res.json({ error: 'Não foi possível extrair o código/link.' });
     }
 
   } catch(e) {
