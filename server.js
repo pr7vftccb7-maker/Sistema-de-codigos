@@ -8,7 +8,6 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// ========== CONFIG ==========
 let config = { email: '', senha: '02022013L' };
 
 const CONFIG_FILE = path.join(__dirname, 'config.json');
@@ -18,7 +17,6 @@ try {
   }
 } catch(e) {}
 
-// ========== KEEP ALIVE — ping automático ==========
 const APP_URL = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || '';
 const PING_INTERVAL = 4 * 60 * 1000;
 
@@ -26,11 +24,9 @@ function keepAlive() {
   if (!APP_URL) return;
   setInterval(() => {
     https.get(APP_URL + '/api/ping', () => {}).on('error', () => {});
-    console.log('[keepalive] ping enviado');
   }, PING_INTERVAL);
 }
 
-// ========== PADRÕES DE BUSCA ==========
 const SERVICE_PATTERNS = {
   netflix_login: {
     subject: 'Netflix',
@@ -70,7 +66,6 @@ const SERVICE_PATTERNS = {
   }
 };
 
-// ========== ROTAS ==========
 app.get('/api/ping', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
@@ -102,7 +97,7 @@ app.post('/api/search', async (req, res) => {
   let browser;
   try {
     browser = await puppeteer.launch({
-      headless: 'new',
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -114,7 +109,7 @@ app.post('/api/search', async (req, res) => {
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36');
 
     console.log('[login] acessando outlook...');
     await page.goto('https://outlook.live.com/', { waitUntil: 'networkidle2', timeout: 30000 });
@@ -239,6 +234,6 @@ app.post('/api/search', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('🔥 Servidor rodando em http://localhost:' + PORT);
+  console.log('Servidor rodando em http://localhost:' + PORT);
   setTimeout(keepAlive, 30000);
 });
