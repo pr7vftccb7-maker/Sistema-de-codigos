@@ -1,5 +1,6 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -29,36 +30,30 @@ function keepAlive() {
 
 const SERVICE_PATTERNS = {
   netflix_login: {
-    subject: 'Netflix',
     bodyPattern: /Informe este código para entrar[^]*?(\d{4})/i,
     type: 'code',
     label: 'Código de Login',
     fallbackPattern: /(\d{4})\s*Informe o código acima/i
   },
   netflix_reset: {
-    subject: 'Netflix',
     bodyPattern: /Vamos redefinir sua senha/i,
     type: 'link',
     label: 'Redefinir Senha',
-    clickText: 'Redefinir senha',
-    linkDomain: 'netflix.com/password'
+    clickText: 'Redefinir senha'
   },
   netflix_verify: {
-    subject: 'Netflix',
     bodyPattern: /Confirme com o código[^]*?(\d{6})/i,
     type: 'code',
     label: 'Código de Verificação',
     fallbackPattern: /código[^]*?(\d{6})/i
   },
   netflix_temp: {
-    subject: 'Netflix',
     bodyPattern: /código de acesso temporário/i,
     type: 'link',
     label: 'Código Temporário',
     clickText: 'Receber código'
   },
   netflix_house: {
-    subject: 'Netflix',
     bodyPattern: /atualizar sua residência Netflix/i,
     type: 'link',
     label: 'Atualizar Residência',
@@ -97,18 +92,13 @@ app.post('/api/search', async (req, res) => {
   let browser;
   try {
     browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--single-process'
-      ]
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless
     });
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36');
 
     console.log('[login] acessando outlook...');
@@ -220,7 +210,7 @@ app.post('/api/search', async (req, res) => {
     if (result) {
       res.json({ found: true, result, service: svc.label });
     } else {
-      res.json({ error: 'Não foi possível extrair o código/link. O email pode estar em formato diferente do esperado.' });
+      res.json({ error: 'Não foi possível extrair o código/link.' });
     }
 
   } catch(e) {
