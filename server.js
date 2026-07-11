@@ -92,21 +92,38 @@ app.post('/api/search', async (req, res) => {
   let browser;
   try {
     browser = await puppeteer.launch({
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        '--single-process',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-zygote',
+        '--max-old-space-size=256'
+      ],
       defaultViewport: chromium.defaultViewport,
       executablePath: await chromium.executablePath(),
       headless: chromium.headless
     });
 
     const page = await browser.newPage();
+
+    // Bloqueia imagens, CSS e fontes pra economizar memória
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      const type = req.resourceType();
+      if (type === 'image' || type === 'stylesheet' || type === 'font' || type === 'media') {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36');
 
-    // ===== LOGIN OUTLOOK (com seletores atualizados) =====
     console.log('[login] acessando outlook...');
     await page.goto('https://login.live.com/', { waitUntil: 'networkidle2', timeout: 30000 });
     await new Promise(r => setTimeout(r, 2000));
 
-    // Campo de email - tenta vários seletores
     const emailSelectors = [
       'input[type="email"]',
       'input[name="loginfmt"]',
@@ -126,7 +143,6 @@ app.post('/api/search', async (req, res) => {
     }
 
     if (!emailInput) {
-      // Tenta pelo placeholder
       emailInput = await page.waitForSelector('input[placeholder*="email"], input[placeholder*="Email"], input[placeholder*="conta"]', { timeout: 5000 }).catch(() => null);
     }
 
@@ -139,17 +155,13 @@ app.post('/api/search', async (req, res) => {
     await emailInput.type(config.email, { delay: 60 });
     console.log('[login] email preenchido');
 
-    // Clica no botão "Avançar" / "Next"
     await page.keyboard.press('Enter');
     await new Promise(r => setTimeout(r, 2000));
 
-    // Tenta clicar no botão se Enter não funcionou
     const submitSelectors = [
       'input[type="submit"]',
       'button[type="submit"]',
-      '#idSIButton9',
-      'button:has-text("Next")',
-      'button:has-text("Avançar")'
+      '#idSIButton9'
     ];
 
     for (const sel of submitSelectors) {
@@ -163,7 +175,6 @@ app.post('/api/search', async (req, res) => {
       } catch(e) {}
     }
 
-    // Campo de senha - tenta vários seletores
     const passSelectors = [
       'input[type="password"]',
       'input[name="passwd"]',
@@ -201,15 +212,11 @@ app.post('/api/search', async (req, res) => {
       }
     }
 
-    // "Manter conectado" / "Stay signed in"
     try {
       const staySelectors = [
         'input[type="submit"]',
         '#idSIButton9',
-        'button[type="submit"]',
-        'button:has-text("Sim")',
-        'button:has-text("Yes")',
-        'button:has-text("Manter")'
+        'button[type="submit"]'
       ];
       for (const sel of staySelectors) {
         try {
@@ -223,12 +230,10 @@ app.post('/api/search', async (req, res) => {
       }
     } catch(e) {}
 
-    // Aguarda inbox
     console.log('[login] aguardando inbox...');
     await page.goto('https://outlook.live.com/mail/0/', { waitUntil: 'networkidle2', timeout: 30000 });
     await new Promise(r => setTimeout(r, 4000));
 
-    // ===== BUSCAR EMAIL NETFLIX =====
     let found = false;
     const itemSelectors = [
       '[role="main"] [role="option"]',
@@ -267,19 +272,16 @@ app.post('/api/search', async (req, res) => {
       return res.json({ error: 'Nenhum email da Netflix encontrado na caixa de entrada' });
     }
 
-    // ===== LER CONTEÚDO =====
     await new Promise(r => setTimeout(r, 2000));
     const emailBody = await page.evaluate(() => {
       const doc = document.querySelector('[role="document"]');
       if (doc) return doc.innerText;
-      // fallback: todo conteúdo visível
       const main = document.querySelector('[role="main"]');
       return main ? main.innerText : document.body.innerText;
     });
 
     console.log('[email] corpo lido, ' + emailBody.length + ' caracteres');
 
-    // ===== EXTRAIR RESULTADO =====
     let result = null;
 
     if (svc.type === 'code') {
