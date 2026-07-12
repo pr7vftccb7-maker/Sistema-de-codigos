@@ -187,6 +187,7 @@ const statusTitle = document.getElementById('statusTitle');
 const statusMsg = document.getElementById('statusMsg');
 const statusDetail = document.getElementById('statusDetail');
 const mainBtn = document.getElementById('mainBtn');
+const emailInput = document.getElementById('emailInput');
 
 const stepEls = [
   document.getElementById('stepOutlook'),
@@ -233,57 +234,24 @@ const STATUS_TITLES = {
 };
 
 const ERROR_CODES = new Set([
-  'captcha',
-  'protect_account',
-  'extra_confirmation',
-  'account_blocked',
-  'wrong_password',
-  'email_not_found',
-  'too_many_attempts',
-  'login_not_completed',
-  'mailbox_not_ready',
-  'config_error',
-  'service_error',
-  'process_error'
+  'captcha', 'protect_account', 'extra_confirmation', 'account_blocked',
+  'wrong_password', 'email_not_found', 'too_many_attempts',
+  'login_not_completed', 'mailbox_not_ready', 'config_error',
+  'service_error', 'process_error'
 ]);
 
 const WARN_CODES = new Set(['not_found']);
 const OK_CODES = new Set(['mailbox_ready', 'found']);
 
 const STAGE_BY_CODE = {
-  idle: 0,
-  saving_config: 1,
-  starting: 1,
-  opening_outlook: 1,
-  checking_screen: 1,
-
-  email_step: 2,
-  password_step: 2,
-  login_continue: 2,
-  wrong_password: 2,
-  email_not_found: 2,
-  captcha: 2,
-  protect_account: 2,
-  extra_confirmation: 2,
-  account_blocked: 2,
-  too_many_attempts: 2,
-  login_not_completed: 2,
-
-  waiting_mailbox: 3,
-  mailbox_ready: 3,
-  opening_inbox: 3,
-  mailbox_not_ready: 3,
-
-  searching: 4,
-  email_opened: 4,
-  not_found: 4,
-
-  extracting: 5,
-  found: 6,
-
-  config_error: 1,
-  service_error: 1,
-  process_error: 1
+  idle: 0, saving_config: 1, starting: 1, opening_outlook: 1, checking_screen: 1,
+  email_step: 2, password_step: 2, login_continue: 2, wrong_password: 2,
+  email_not_found: 2, captcha: 2, protect_account: 2, extra_confirmation: 2,
+  account_blocked: 2, too_many_attempts: 2, login_not_completed: 2,
+  waiting_mailbox: 3, mailbox_ready: 3, opening_inbox: 3, mailbox_not_ready: 3,
+  searching: 4, email_opened: 4, not_found: 4,
+  extracting: 5, found: 6,
+  config_error: 1, service_error: 1, process_error: 1
 };
 
 function resetUI() {
@@ -291,7 +259,7 @@ function resetUI() {
   resultCard.classList.remove('show');
   errorCard.classList.remove('show');
   statusCard.classList.remove('show', 'loading', 'ok', 'warn', 'error');
-  stepEls.forEach(s => s.classList.remove('done', 'active', 'error', 'warn'));
+  stepEls.forEach(s => { if(s) s.classList.remove('done', 'active', 'error', 'warn'); });
   lastResult = '';
   lastIsLink = false;
 }
@@ -308,27 +276,29 @@ function updateSteps(code) {
   const isError = ERROR_CODES.has(code);
   const isWarn = WARN_CODES.has(code);
 
-  stepEls.forEach(s => s.classList.remove('done', 'active', 'error', 'warn'));
+  stepEls.forEach(s => { if(s) s.classList.remove('done', 'active', 'error', 'warn'); });
 
   if (stage <= 0) return;
 
   if (code === 'found') {
-    stepEls.forEach(s => s.classList.add('done'));
+    stepEls.forEach(s => { if(s) s.classList.add('done'); });
     return;
   }
 
   const activeIndex = Math.min(Math.max(stage - 1, 0), stepEls.length - 1);
 
   for (let i = 0; i < activeIndex; i++) {
-    stepEls[i].classList.add('done');
+    if(stepEls[i]) stepEls[i].classList.add('done');
   }
 
-  if (isError) {
-    stepEls[activeIndex].classList.add('error');
-  } else if (isWarn) {
-    stepEls[activeIndex].classList.add('warn');
-  } else {
-    stepEls[activeIndex].classList.add('active');
+  if (stepEls[activeIndex]) {
+    if (isError) {
+      stepEls[activeIndex].classList.add('error');
+    } else if (isWarn) {
+      stepEls[activeIndex].classList.add('warn');
+    } else {
+      stepEls[activeIndex].classList.add('active');
+    }
   }
 }
 
@@ -341,19 +311,20 @@ function showStatus(code, message, detail) {
   statusTitle.textContent = STATUS_TITLES[code] || 'Status';
   statusMsg.textContent = message || 'Processando...';
   statusDetail.textContent = detail || '';
-  statusDetail.style.display = detail ? '' : 'none';
+  statusDetail.style.display = detail ? 'block' : 'none';
 
   updateSteps(code || 'starting');
 }
 
 function stopStatusPoll() {
   if (statusTimer) {
-    clearInterval(statusTimer);
+    clearTimeout(statusTimer);
     statusTimer = null;
   }
 }
 
 async function pollStatus() {
+  if (!isSearching) return;
   try {
     const res = await fetch(API + '/api/status', { cache: 'no-store' });
     const data = await res.json();
@@ -362,25 +333,28 @@ async function pollStatus() {
       showStatus(data.code, data.message, data.detail);
     }
   } catch (e) {}
+  statusTimer = setTimeout(pollStatus, 1500);
 }
 
 function startStatusPoll() {
   stopStatusPoll();
   showStatus('starting', 'Iniciando busca...');
-  setTimeout(pollStatus, 700);
-  statusTimer = setInterval(pollStatus, 1500);
+  statusTimer = setTimeout(pollStatus, 700);
 }
 
-function setSearchingState(value) {
+function setSearchingState(value, serviceId = 'netflix_login') {
   isSearching = value;
   mainBtn.disabled = value;
   mainBtn.textContent = value ? 'Buscando...' : 'Buscar';
+  if(!value) {
+    mainBtn.setAttribute('onclick', `buscar('${serviceId}')`);
+  }
 }
 
 async function buscar(serviceId) {
   if (isSearching) return;
 
-  const email = document.getElementById('emailInput').value.trim();
+  const email = emailInput.value.trim();
 
   if (!email) {
     alert('Informe o email');
@@ -388,7 +362,7 @@ async function buscar(serviceId) {
   }
 
   resetUI();
-  setSearchingState(true);
+  setSearchingState(true, serviceId);
   showStatus('saving_config', 'Salvando email e preparando busca...');
 
   try {
@@ -406,7 +380,7 @@ async function buscar(serviceId) {
       throw new Error(cfgData.error);
     }
   } catch (e) {
-    setSearchingState(false);
+    setSearchingState(false, serviceId);
     showStatus('config_error', e.message || 'Erro ao salvar email/senha.');
     showError(e.message || 'Erro ao salvar email/senha.');
     return;
@@ -426,14 +400,14 @@ async function buscar(serviceId) {
     data = await res.json();
   } catch (e) {
     stopStatusPoll();
-    setSearchingState(false);
+    setSearchingState(false, serviceId);
     showStatus('process_error', 'Erro de conexão com o servidor');
     showError('Erro de conexão com o servidor');
     return;
   }
 
   stopStatusPoll();
-  setSearchingState(false);
+  setSearchingState(false, serviceId);
 
   if (data && data.status) {
     showStatus(data.status.code, data.status.message, data.status.detail);
@@ -492,10 +466,21 @@ function openLink() {
   }
 }
 
+emailInput.addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') {
+    const currentAction = mainBtn.getAttribute('onclick');
+    if(currentAction) {
+      eval(currentAction);
+    } else {
+      buscar('netflix_login');
+    }
+  }
+});
+
 fetch(API + '/api/config')
   .then(r => r.json())
   .then(d => {
-    if (d.email) document.getElementById('emailInput').value = d.email;
+    if (d.email) emailInput.value = d.email;
   })
   .catch(() => {});
 </script>
