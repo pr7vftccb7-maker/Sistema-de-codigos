@@ -6,20 +6,53 @@ const fs = require('fs');
 const https = require('https');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+// Evita expor arquivos sensíveis quando o Express serve a pasta do projeto.
+app.use((req, res, next) => {
+  const blocked = new Set(['/server.js', '/config.json', '/package.json', '/package-lock.json']);
+  if (blocked.has(req.path)) return res.status(404).send('Not found');
+  next();
+});
+
 app.use(express.static(path.join(__dirname)));
 
-let config = { email: '', senha: '02022013L' };
-
 const CONFIG_FILE = path.join(__dirname, 'config.json');
+
+let config = {
+  email: '',
+  senha: process.env.OUTLOOK_SENHA || ''
+};
+
 try {
   if (fs.existsSync(CONFIG_FILE)) {
-    config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    config.email = saved.email || config.email;
+    config.senha = saved.senha || config.senha;
   }
-} catch(e) {}
+} catch (e) {
+  console.log('[config] não foi possível ler config.json:', e.message);
+}
 
 const APP_URL = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || '';
 const PING_INTERVAL = 4 * 60 * 1000;
+
+let currentStatus = {
+  code: 'idle',
+  message: 'Aguardando busca.',
+  detail: '',
+  updatedAt: new Date().toISOString()
+};
+
+function setStatus(code, message, detail = '') {
+  currentStatus = {
+    code,
+    message,
+    detail: detail ? String(detail).slice(0, 700) : '',
+    updatedAt: new Date().toISOString()
+  };
+  console.log('[status]', code, '-', message);
+}
 
 function keepAlive() {
   if (!APP_URL) return;
@@ -28,263 +61,653 @@ function keepAlive() {
   }, PING_INTERVAL);
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function normalizeText(str) {
+  return (str || '')
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function detectOutlookIssue(text, url = '') {
+  const t = normalizeText(text);
+  const u = String(url || '').toLowerCase();
+  const detail = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 700);
+
+  if (/captcha|prove que voce nao e um robo|prove you are not a robot|robot check|verification challenge|desafio de verificacao/.test(t)) {
+    return {
+      code: 'captcha',
+      message: 'Captcha/verificação anti-robô detectada no Outlook. Resolva manualmente na conta e tente de novo.',
+      detail
+    };
+  }
+
+  if (/senha incorreta|senha que voce inseriu esta incorreta|sua conta ou senha esta incorreta|password is incorrect|your account or password is incorrect|incorrect password/.test(t)) {
+    return {
+      code: 'wrong_password',
+      message: 'Senha incorreta no Outlook. Verifique a senha cadastrada e tente novamente.',
+      detail
+    };
+  }
+
+  if (/nao encontramos uma conta|nao reconhecemos esse usuario|essa conta microsoft nao existe|we could not find an account|we couldn't find an account|that microsoft account doesn't exist|we don't recognize this user/.test(t)) {
+    return {
+      code: 'email_not_found',
+      message: 'Email Outlook não encontrado ou inválido.',
+      detail
+    };
+  }
+
+  if (/sua conta foi bloqueada|conta bloqueada|temporariamente bloqueada|account has been locked|account locked|temporarily locked|suspended/.test(t)) {
+    return {
+      code: 'account_blocked',
+      message: 'Conta Outlook bloqueada. Entre manualmente no Outlook para desbloquear antes de usar o sistema.',
+      detail
+    };
+  }
+
+  if (/ajude-nos a proteger sua conta|vamos proteger sua conta|help us protect your account|protect your account|mantenha sua conta segura|keep your account secure|adicionar informacoes de seguranca|add security info/.test(t) || /\/proofs\//.test(u)) {
+    return {
+      code: 'protect_account',
+      message: 'Outlook pediu “ajude-nos a proteger sua conta”. Acesse manualmente e conclua essa etapa.',
+      detail
+    };
+  }
+
+  if (/verifique sua identidade|confirmar identidade|confirme sua identidade|verify your identity|confirm your identity|insira o codigo|digite o codigo|enter code|security code|codigo de seguranca|aprovar solicitacao|aprovar a solicitacao|approve sign.?in request|microsoft authenticator|authenticator|duas etapas|two-step|two factor|2fa|use seu aplicativo/.test(t) || /\/identity\/|\/ppsecure\//.test(u)) {
+    return {
+      code: 'extra_confirmation',
+      message: 'Outlook pediu confirmação extra/verificação de segurança. Confirme manualmente e tente novamente.',
+      detail
+    };
+  }
+
+  if (/muitas tentativas|voce tentou entrar muitas vezes|too many times|try again later|tente novamente mais tarde|temporariamente indisponivel/.test(t)) {
+    return {
+      code: 'too_many_attempts',
+      message: 'Outlook bloqueou temporariamente por muitas tentativas. Aguarde um pouco e tente novamente.',
+      detail
+    };
+  }
+
+  return null;
+}
+
 const SERVICE_PATTERNS = {
   netflix_login: {
-    bodyPattern: /Informe este código para entrar[^]*?(\d{4})/i,
     type: 'code',
     label: 'Código de Login',
-    fallbackPattern: /(\d{4})\s*Informe o código acima/i
+    codeLength: 4,
+    bodyPattern: /Informe este código para entrar[\s\S]*?\b(\d{4})\b/i,
+    fallbackPattern: /\b(\d{4})\b[\s\S]*?Informe o código acima/i,
+    extraPatterns: [/entrar na Netflix/i, /c[oó]digo[\s\S]*?entrar/i]
   },
   netflix_reset: {
-    bodyPattern: /Vamos redefinir sua senha/i,
     type: 'link',
     label: 'Redefinir Senha',
-    clickText: 'Redefinir senha'
+    bodyPattern: /Vamos redefinir sua senha|redefinir sua senha/i,
+    clickText: ['Redefinir senha', 'Reset password']
   },
   netflix_verify: {
-    bodyPattern: /Confirme com o código[^]*?(\d{6})/i,
     type: 'code',
     label: 'Código de Verificação',
-    fallbackPattern: /código[^]*?(\d{6})/i
+    codeLength: 6,
+    bodyPattern: /Confirme com o código[\s\S]*?\b(\d{6})\b/i,
+    fallbackPattern: /c[oó]digo[\s\S]*?\b(\d{6})\b/i,
+    extraPatterns: [/verifica/i, /confirme/i]
   },
   netflix_temp: {
-    bodyPattern: /código de acesso temporário/i,
     type: 'link',
     label: 'Código Temporário',
-    clickText: 'Receber código'
+    bodyPattern: /c[oó]digo de acesso tempor[aá]rio|acesso tempor[aá]rio/i,
+    clickText: ['Receber código', 'Obter código', 'Get code']
   },
   netflix_house: {
-    bodyPattern: /atualizar sua residência Netflix/i,
     type: 'link',
     label: 'Atualizar Residência',
-    clickText: 'Sim, fui eu'
+    bodyPattern: /atualizar sua resid[êe]ncia Netflix|resid[êe]ncia Netflix/i,
+    clickText: ['Sim, fui eu', 'Atualizar residência', 'Yes, it was me']
   }
 };
+
+const EMAIL_SELECTORS = [
+  'input[type="email"]',
+  'input[name="loginfmt"]',
+  '#i0116'
+];
+
+const PASSWORD_SELECTORS = [
+  'input[type="password"]',
+  'input[name="passwd"]',
+  '#i0118'
+];
+
+const MAIL_READY_SELECTORS = [
+  '[role="main"]',
+  '[role="listbox"]',
+  '[aria-label*="Lista de mensagens"]',
+  '[aria-label*="Message list"]',
+  'div[data-app-section="MailReadCompose"]'
+];
+
+const SEARCH_SELECTORS = [
+  'input[aria-label*="Pesquisar"]',
+  'input[placeholder*="Pesquisar"]',
+  'input[aria-label*="Search"]',
+  'input[placeholder*="Search"]',
+  'input[role="searchbox"]',
+  '[role="searchbox"]',
+  '[contenteditable="true"][aria-label*="Pesquisar"]',
+  '[contenteditable="true"][aria-label*="Search"]'
+];
+
+const MESSAGE_SELECTORS = [
+  '[role="main"] [role="option"]',
+  '[role="main"] [role="listitem"]',
+  '[role="main"] div[data-convid]',
+  '[role="listbox"] [role="option"]',
+  '[aria-label*="Lista de mensagens"] [role="option"]',
+  '[aria-label*="Message list"] [role="option"]'
+];
+
+function saveConfig() {
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+async function firstExisting(page, selectors) {
+  for (const selector of selectors) {
+    const el = await page.$(selector).catch(() => null);
+    if (el) return el;
+  }
+  return null;
+}
+
+async function getVisibleText(page) {
+  return page.evaluate(() => (document.body.innerText || document.body.textContent || '').replace(/\s+/g, ' ').trim()).catch(() => '');
+}
+
+async function throwIfOutlookIssue(page) {
+  const text = await getVisibleText(page);
+  const issue = detectOutlookIssue(text, page.url());
+  if (!issue) return;
+
+  setStatus(issue.code, issue.message, issue.detail);
+
+  const err = new Error(issue.message);
+  err.code = issue.code;
+  err.detail = issue.detail;
+  throw err;
+}
+
+async function clearAndType(page, element, value) {
+  await element.click({ clickCount: 3 }).catch(() => {});
+  await page.keyboard.down('Control').catch(() => {});
+  await page.keyboard.press('A').catch(() => {});
+  await page.keyboard.up('Control').catch(() => {});
+  await page.keyboard.press('Backspace').catch(() => {});
+  await element.type(value, { delay: 35 });
+}
+
+async function clickByVisibleText(page, words) {
+  return page.evaluate((words) => {
+    const normalize = (s) => (s || '')
+      .toString()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const targets = words.map(normalize);
+    const els = Array.from(document.querySelectorAll('button, input[type="submit"], a, div[role="button"], span[role="button"]'));
+
+    for (const el of els) {
+      const txt = normalize(el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '');
+      if (!txt) continue;
+      if (targets.some(t => txt === t || txt.includes(t))) {
+        el.click();
+        return txt;
+      }
+    }
+    return null;
+  }, words).catch(() => null);
+}
+
+async function setupPage(page) {
+  page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(90000);
+
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+  );
+
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
+  });
+
+  // Não bloqueia CSS, porque o Outlook às vezes depende do layout para carregar a lista.
+  await page.setRequestInterception(true);
+  page.on('request', (request) => {
+    const type = request.resourceType();
+    if (type === 'image' || type === 'font' || type === 'media') {
+      request.abort().catch(() => {});
+    } else {
+      request.continue().catch(() => {});
+    }
+  });
+}
+
+async function launchBrowser() {
+  const executablePath = await chromium.executablePath();
+
+  return puppeteer.launch({
+    args: [
+      ...chromium.args,
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-zygote',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-default-apps',
+      '--mute-audio'
+    ],
+    defaultViewport: chromium.defaultViewport || { width: 1365, height: 768 },
+    executablePath,
+    headless: chromium.headless,
+    ignoreHTTPSErrors: true
+  });
+}
+
+async function isMailLoaded(page) {
+  const url = page.url();
+  if (!url.includes('outlook.live.com')) return false;
+
+  const el = await firstExisting(page, MAIL_READY_SELECTORS);
+  if (!el) return false;
+
+  const text = await getVisibleText(page);
+  if (/entrar|sign in|loginfmt/i.test(text) && !/caixa de entrada|inbox|rascunhos|drafts|itens enviados|sent items/i.test(text)) {
+    return false;
+  }
+
+  return true;
+}
+
+async function loginOutlook(page, email, senha) {
+  setStatus('opening_outlook', 'Abrindo Outlook...');
+  console.log('[login] abrindo Outlook...');
+
+  await page.goto('https://outlook.live.com/mail/0/inbox', {
+    waitUntil: 'domcontentloaded',
+    timeout: 90000
+  }).catch(e => console.log('[login] goto:', e.message));
+
+  await sleep(2500);
+
+  for (let attempt = 1; attempt <= 70; attempt++) {
+    await throwIfOutlookIssue(page);
+
+    if (await isMailLoaded(page)) {
+      setStatus('login_ok', 'Entrou no Outlook com sucesso. Procurando emails da Netflix...');
+      console.log('[login] Outlook carregado');
+      return true;
+    }
+
+    const emailInput = await firstExisting(page, EMAIL_SELECTORS);
+    if (emailInput) {
+      setStatus('email_step', 'Informando email do Outlook...');
+      console.log('[login] preenchendo email');
+      await clearAndType(page, emailInput, email);
+      await page.keyboard.press('Enter').catch(() => {});
+      await sleep(3000);
+      continue;
+    }
+
+    const passInput = await firstExisting(page, PASSWORD_SELECTORS);
+    if (passInput) {
+      setStatus('password_step', 'Informando senha do Outlook...');
+      console.log('[login] preenchendo senha');
+      await clearAndType(page, passInput, senha);
+      await page.keyboard.press('Enter').catch(() => {});
+      await sleep(4000);
+      continue;
+    }
+
+    const clicked = await clickByVisibleText(page, [
+      'Entrar',
+      'Sign in',
+      'Próximo',
+      'Next',
+      'Sim',
+      'Yes',
+      'Continuar',
+      'Continue',
+      'Ignorar por enquanto',
+      'Skip for now',
+      'Talvez mais tarde',
+      'Maybe later',
+      'Agora não',
+      'Not now'
+    ]);
+
+    if (clicked) {
+      setStatus('login_continue', 'Respondendo tela do Outlook: ' + clicked);
+      console.log('[login] clique automático:', clicked);
+      await sleep(3000);
+      continue;
+    }
+
+    const submit = await firstExisting(page, [
+      '#idSIButton9',
+      '#idSubmit_SAOTCC_Continue',
+      'input[type="submit"]',
+      'button[type="submit"]'
+    ]);
+
+    if (submit) {
+      setStatus('login_continue', 'Continuando login do Outlook...');
+      console.log('[login] clicando submit');
+      await submit.click().catch(() => {});
+      await sleep(3000);
+      continue;
+    }
+
+    if (attempt % 10 === 0) {
+      setStatus('waiting_outlook', 'Aguardando Outlook carregar...');
+    }
+
+    await sleep(1000);
+  }
+
+  const text = await getVisibleText(page);
+  const issue = detectOutlookIssue(text, page.url());
+  if (issue) {
+    setStatus(issue.code, issue.message, issue.detail);
+    const err = new Error(issue.message);
+    err.code = issue.code;
+    err.detail = issue.detail;
+    throw err;
+  }
+
+  const err = new Error('Login do Outlook não concluiu. Pode existir uma tela de confirmação não reconhecida.');
+  err.code = 'login_not_completed';
+  err.detail = 'URL atual: ' + page.url() + ' | Tela: ' + text.slice(0, 500);
+  setStatus(err.code, err.message, err.detail);
+  throw err;
+}
+
+async function useOutlookSearch(page, query) {
+  const search = await firstExisting(page, SEARCH_SELECTORS);
+  if (!search) {
+    console.log('[search] campo de pesquisa não encontrado, usando lista atual');
+    setStatus('searching', 'Não achei a busca do Outlook. Vou procurar na lista atual...');
+    return false;
+  }
+
+  setStatus('searching', 'Pesquisando emails da Netflix no Outlook...');
+  console.log('[search] pesquisando:', query);
+  await clearAndType(page, search, query);
+  await page.keyboard.press('Enter').catch(() => {});
+  await sleep(6500);
+  return true;
+}
+
+async function getNetflixMessageItems(page) {
+  const selector = MESSAGE_SELECTORS.join(', ');
+  const items = await page.$$(selector).catch(() => []);
+  const rows = [];
+
+  for (const item of items) {
+    const text = await item.evaluate(el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim()).catch(() => '');
+    if (text && text.toLowerCase().includes('netflix')) {
+      rows.push({ item, text });
+    }
+  }
+
+  return rows;
+}
+
+async function openNetflixMessage(page, index) {
+  const rows = await getNetflixMessageItems(page);
+  console.log('[search] mensagens Netflix visíveis:', rows.length);
+
+  if (!rows[index]) return false;
+
+  setStatus('email_opened', 'Abrindo email da Netflix ' + (index + 1) + ' de ' + rows.length + '...');
+  console.log('[search] abrindo mensagem', index + 1, '-', rows[index].text.slice(0, 120));
+  await rows[index].item.click().catch(() => {});
+  await sleep(3000);
+  return true;
+}
+
+async function readEmailBody(page) {
+  await sleep(1000);
+
+  return page.evaluate(() => {
+    const selectors = [
+      '[role="document"]',
+      '[aria-label*="Corpo"]',
+      '[aria-label*="Message body"]',
+      '[data-app-section="ReadingPane"]',
+      '[role="main"]'
+    ];
+
+    let best = '';
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      const text = el ? (el.innerText || el.textContent || '') : '';
+      if (text.length > best.length) best = text;
+    }
+
+    return (best || document.body.innerText || document.body.textContent || '').replace(/\s+/g, ' ').trim();
+  }).catch(() => '');
+}
+
+function bodyLooksLikeService(body, svc) {
+  if (!body) return false;
+  if (svc.bodyPattern && svc.bodyPattern.test(body)) return true;
+  if (svc.fallbackPattern && svc.fallbackPattern.test(body)) return true;
+  if (svc.extraPatterns && svc.extraPatterns.some(rx => rx.test(body))) return true;
+  return false;
+}
+
+function cleanLink(url) {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    const inner = parsed.searchParams.get('url') || parsed.searchParams.get('u');
+    if (inner && /netflix\.com/i.test(inner)) return decodeURIComponent(inner);
+  } catch (_) {}
+  return url.replace(/[)\].,;]+$/g, '');
+}
+
+function extractCode(body, svc) {
+  const patterns = [svc.bodyPattern, svc.fallbackPattern].filter(Boolean);
+
+  for (const pattern of patterns) {
+    const match = body.match(pattern);
+    if (match && match[1]) return match[1];
+  }
+
+  if (bodyLooksLikeService(body, svc) && svc.codeLength) {
+    const rx = new RegExp('\\b(\\d{' + svc.codeLength + '})\\b', 'g');
+    const all = [...body.matchAll(rx)].map(m => m[1]);
+    if (all.length) return all[0];
+  }
+
+  return null;
+}
+
+async function extractLink(page, body, svc) {
+  if (!bodyLooksLikeService(body, svc)) return null;
+
+  const clickTexts = Array.isArray(svc.clickText) ? svc.clickText : [svc.clickText].filter(Boolean);
+
+  const href = await page.$$eval('a', (els, clickTexts) => {
+    const normalize = (s) => (s || '')
+      .toString()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const targets = clickTexts.map(normalize);
+
+    for (const el of els) {
+      const text = normalize(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
+      const href = el.href || '';
+      if (href && targets.some(t => text.includes(t))) return href;
+    }
+
+    for (const el of els) {
+      const href = el.href || '';
+      if (href.includes('netflix.com') || href.includes('safelinks.protection.outlook.com')) return href;
+    }
+
+    return null;
+  }, clickTexts).catch(() => null);
+
+  if (href) return cleanLink(href);
+
+  const urlMatch = body.match(/https?:\/\/[^\s"'<>]+/i);
+  if (urlMatch && /netflix\.com|safelinks\.protection\.outlook\.com/i.test(urlMatch[0])) {
+    return cleanLink(urlMatch[0]);
+  }
+
+  return null;
+}
+
+async function extractResult(page, body, svc) {
+  setStatus('extracting', 'Extraindo código/link do email...');
+  if (svc.type === 'code') return extractCode(body, svc);
+  if (svc.type === 'link') return extractLink(page, body, svc);
+  return null;
+}
+
+async function findNetflixResult(page, svc) {
+  setStatus('opening_inbox', 'Abrindo caixa de entrada...');
+  console.log('[search] abrindo inbox...');
+
+  await page.goto('https://outlook.live.com/mail/0/inbox', {
+    waitUntil: 'domcontentloaded',
+    timeout: 90000
+  }).catch(e => console.log('[search] goto inbox:', e.message));
+
+  await sleep(5000);
+
+  await useOutlookSearch(page, 'Netflix');
+
+  for (let i = 0; i < 25; i++) {
+    const opened = await openNetflixMessage(page, i);
+    if (!opened) break;
+
+    const body = await readEmailBody(page);
+    console.log('[email] corpo lido:', body.length, 'caracteres');
+
+    const result = await extractResult(page, body, svc);
+    if (result) {
+      setStatus('found', 'Código/link encontrado com sucesso.');
+      console.log('[result] encontrado');
+      return result;
+    }
+  }
+
+  setStatus('not_found', 'Entrou no Outlook, mas não encontrou email compatível com esse serviço da Netflix.');
+  return null;
+}
 
 app.get('/api/ping', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
+app.get('/api/status', (req, res) => {
+  res.json(currentStatus);
+});
+
 app.get('/api/config', (req, res) => {
-  res.json({ email: config.email });
+  res.json({ email: config.email || '' });
 });
 
 app.post('/api/config', (req, res) => {
-  const { email, senha } = req.body;
-  config.email = email || config.email;
-  config.senha = senha || config.senha;
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  const { email, senha } = req.body || {};
+
+  if (typeof email === 'string' && email.trim()) {
+    config.email = email.trim();
+  }
+
+  if (typeof senha === 'string' && senha.trim()) {
+    config.senha = senha.trim();
+  }
+
+  try {
+    saveConfig();
+  } catch (e) {
+    return res.json({ error: 'Não foi possível salvar config.json: ' + e.message });
+  }
+
   res.json({ ok: true });
 });
 
 app.post('/api/search', async (req, res) => {
-  const { service } = req.body;
+  const { service } = req.body || {};
+  const svc = SERVICE_PATTERNS[service];
 
-  if (!config.email || !config.senha) {
-    return res.json({ error: 'Email/senha não configurados' });
+  if (!svc) {
+    setStatus('service_error', 'Serviço não encontrado: ' + service);
+    return res.json({ error: 'Serviço não encontrado: ' + service, code: 'service_error', status: currentStatus });
   }
 
-  const svc = SERVICE_PATTERNS[service];
-  if (!svc) {
-    return res.json({ error: 'Serviço não encontrado: ' + service });
+  if (!config.email || !config.senha) {
+    setStatus('config_error', 'Email/senha não configurados.');
+    return res.json({ error: 'Email/senha não configurados', code: 'config_error', status: currentStatus });
   }
 
   let browser;
+
   try {
-    browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        '--single-process',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-zygote',
-        '--max-old-space-size=256'
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless
-    });
-
+    setStatus('starting', 'Iniciando navegador...');
+    browser = await launchBrowser();
     const page = await browser.newPage();
+    await setupPage(page);
 
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const type = req.resourceType();
-      if (type === 'image' || type === 'stylesheet' || type === 'font' || type === 'media') {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
+    await loginOutlook(page, config.email, config.senha);
 
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36');
-
-    // ===== LOGIN VIA OAUTH SIMPLIFICADO =====
-    console.log('[login] acessando outlook...');
-
-    // Vai direto pro Outlook com parâmetro de login
-    const emailEncoded = encodeURIComponent(config.email);
-    await page.goto('https://outlook.live.com/owa/', {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000
-    });
-    await new Promise(r => setTimeout(r, 3000));
-
-    // Verifica se já está logado ou precisa logar
-    const currentUrl = page.url();
-
-    if (currentUrl.includes('login')) {
-      // Precisa fazer login
-      console.log('[login] página de login detectada');
-
-      // Email
-      let emailDone = false;
-      for (let attempt = 0; attempt < 5 && !emailDone; attempt++) {
-        const input = await page.$('input[type="email"], input[name="loginfmt"], #i0116').catch(() => null);
-        if (input) {
-          await input.click({ clickCount: 3 });
-          await input.type(config.email, { delay: 30 });
-          await page.keyboard.press('Enter');
-          await new Promise(r => setTimeout(r, 3000));
-          emailDone = true;
-        } else {
-          await new Promise(r => setTimeout(r, 2000));
-        }
-      }
-
-      if (!emailDone) {
-        await browser.close();
-        return res.json({ error: 'Não foi possível encontrar o campo de email.' });
-      }
-
-      console.log('[login] email preenchido');
-
-      // Senha
-      let passDone = false;
-      for (let attempt = 0; attempt < 5 && !passDone; attempt++) {
-        const input = await page.$('input[type="password"], input[name="passwd"], #i0118').catch(() => null);
-        if (input) {
-          await input.click({ clickCount: 3 });
-          await input.type(config.senha, { delay: 30 });
-          await page.keyboard.press('Enter');
-          await new Promise(r => setTimeout(r, 3000));
-          passDone = true;
-        } else {
-          await new Promise(r => setTimeout(r, 2000));
-        }
-      }
-
-      console.log('[login] senha preenchida');
-
-      // Stay signed in
-      await new Promise(r => setTimeout(r, 2000));
-      const stayBtn = await page.$('input[type="submit"], #idSIButton9, button[type="submit"]').catch(() => null);
-      if (stayBtn) {
-        await stayBtn.click();
-        await new Promise(r => setTimeout(r, 3000));
-      }
-    } else {
-      console.log('[login] já estava logado ou login via cookie');
-    }
-
-    // Navega pra inbox
-    console.log('[login] abrindo inbox...');
-    await page.goto('https://outlook.live.com/mail/0/inbox', {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000
-    });
-    await new Promise(r => setTimeout(r, 4000));
-
-    // ===== BUSCAR EMAIL NETFLIX =====
-    let found = false;
-    const items = await page.$$('[role="main"] [role="option"], [role="main"] div[data-convid], .lvHighlightAllClass, [role="listitem"]');
-
-    console.log('[search] ' + items.length + ' itens encontrados');
-
-    for (let i = 0; i < Math.min(items.length, 20); i++) {
-      try {
-        const text = await items[i].evaluate(el => el.textContent || '');
-        if (text.toLowerCase().includes('netflix')) {
-          console.log('[search] netflix encontrado na posicao ' + i);
-          await items[i].click();
-          await new Promise(r => setTimeout(r, 3000));
-          found = true;
-          break;
-        }
-      } catch(e) {}
-    }
-
-    if (!found) {
-      await browser.close();
-      return res.json({ error: 'Nenhum email da Netflix encontrado na caixa de entrada' });
-    }
-
-    // ===== LER CONTEÚDO =====
-    await new Promise(r => setTimeout(r, 2000));
-    const emailBody = await page.evaluate(() => {
-      const doc = document.querySelector('[role="document"]');
-      if (doc) return doc.innerText;
-      const main = document.querySelector('[role="main"]');
-      return main ? main.innerText : document.body.innerText;
-    });
-
-    console.log('[email] corpo lido, ' + emailBody.length + ' caracteres');
-
-    // ===== EXTRAIR =====
-    let result = null;
-
-    if (svc.type === 'code') {
-      let match = emailBody.match(svc.bodyPattern);
-      if (match && match[1]) {
-        result = match[1];
-      } else if (svc.fallbackPattern) {
-        match = emailBody.match(svc.fallbackPattern);
-        if (match && match[1]) {
-          result = match[1];
-        }
-      }
-      if (!result) {
-        const digitsOnly = emailBody.match(/\b(\d{4,6})\b/g);
-        if (digitsOnly && digitsOnly.length > 0) {
-          result = digitsOnly[digitsOnly.length - 1];
-        }
-      }
-    } else if (svc.type === 'link') {
-      try {
-        const links = await page.$$eval('a', (els, clickText) => {
-          for (const el of els) {
-            if (el.textContent.trim().includes(clickText) && el.href) return el.href;
-          }
-          for (const el of els) {
-            if (el.href && el.href.includes('netflix.com')) return el.href;
-          }
-          return null;
-        }, svc.clickText);
-
-        if (links) result = links;
-      } catch(e) {}
-
-      if (!result) {
-        const urlMatch = emailBody.match(/https?:\/\/[^\s]*netflix\.com[^\s]*/i);
-        if (urlMatch) result = urlMatch[0];
-      }
-    }
-
-    await browser.close();
-    console.log('[result] ' + (result || 'nada encontrado'));
+    const result = await findNetflixResult(page, svc);
 
     if (result) {
-      res.json({ found: true, result, service: svc.label });
-    } else {
-      res.json({ error: 'Não foi possível extrair o código/link.' });
+      setStatus('found', 'Entrou no Outlook e encontrou o resultado.');
+      return res.json({ found: true, result, service: svc.label, code: 'found', status: currentStatus });
     }
 
-  } catch(e) {
-    console.error('[erro]', e.message);
+    return res.json({
+      error: 'Nenhum email da Netflix compatível com "' + svc.label + '" foi encontrado.',
+      code: 'not_found',
+      status: currentStatus
+    });
+  } catch (e) {
+    const code = e.code || currentStatus.code || 'process_error';
+    const message = e.message || 'Erro no processo.';
+    const detail = e.detail || currentStatus.detail || '';
+
+    console.error('[erro]', message);
+    setStatus(code, message, detail);
+
+    return res.json({ error: message, code, status: currentStatus });
+  } finally {
     if (browser) {
-      try { await browser.close(); } catch(_) {}
+      try { await browser.close(); } catch (_) {}
     }
-    res.json({ error: 'Erro no processo: ' + e.message });
   }
 });
 
