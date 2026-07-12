@@ -4,105 +4,176 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Buscar Código</title>
+
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:#0a0a0a;color:#fff}.wrap{max-width:560px;margin:0 auto;padding:32px 20px 50px;min-height:100vh}h1{font-size:28px;line-height:1;margin:0 0 4px;font-weight:800;letter-spacing:-.03em}.sub{color:#777;font-size:14px;margin:0 0 22px}.field-box{display:flex;gap:8px;margin-bottom:26px;background:#111;border:1px solid #222;border-radius:10px;padding:6px}.field-box input{flex:1;background:transparent;border:0;color:#fff;padding:12px 14px;font-size:15px;outline:none}.field-box button{background:#e50914;color:#fff;border:0;border-radius:8px;padding:12px 22px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap;transition:.15s}.field-box button:hover{background:#ff0f1a}.section-title{font-size:13px;color:#555;text-transform:uppercase;letter-spacing:.06em;margin:0 0 12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:24px}@media(max-width:420px){.grid{grid-template-columns:1fr}}.card{position:relative;border-radius:10px;overflow:hidden;cursor:pointer;aspect-ratio:16/10;background:#1a1a1a;border:2px solid #222;transition:.18s;display:flex;align-items:end}.card:hover{border-color:#e50914;transform:translateY(-2px);box-shadow:0 8px 24px rgba(229,9,20,.2)}.card-bg{position:absolute;inset:0;background-size:cover;background-position:center;transition:.25s}.card:hover .card-bg{transform:scale(1.05)}.card-overlay{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,.95) 0%,rgba(0,0,0,.4) 50%,rgba(0,0,0,.1) 100%)}.card-tag{position:absolute;top:10px;left:10px;background:#e50914;color:#fff;font-size:10px;font-weight:800;padding:4px 8px;border-radius:3px;letter-spacing:.04em;text-transform:uppercase}.card-body{position:relative;z-index:2;padding:14px;width:100%}.card-body .name{font-size:14px;font-weight:700;color:#fff;margin-bottom:2px;line-height:1.2}.card-body .hint{font-size:11px;color:#aaa}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:#0a0a0a;color:#fff}
+.wrap{max-width:560px;margin:0 auto;padding:32px 20px 50px;min-height:100vh}
+h1{font-size:28px;line-height:1;margin:0 0 4px;font-weight:800;letter-spacing:-.03em}
+.sub{color:#777;font-size:14px;margin:0 0 22px}
+.field-box{display:flex;gap:8px;margin-bottom:18px;background:#111;border:1px solid #222;border-radius:10px;padding:6px}
+.field-box input{flex:1;background:transparent;border:0;color:#fff;padding:12px 14px;font-size:15px;outline:none;min-width:0}
+.field-box button{background:#e50914;color:#fff;border:0;border-radius:8px;padding:12px 22px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap;transition:.15s}
+.field-box button:hover{background:#ff0f1a}
+.field-box button:disabled{opacity:.6;cursor:not-allowed}
+.section-title{font-size:13px;color:#555;text-transform:uppercase;letter-spacing:.06em;margin:0 0 12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:24px}
+.card{position:relative;border-radius:10px;overflow:hidden;cursor:pointer;aspect-ratio:16/10;background:#1a1a1a;border:2px solid #222;transition:.18s;display:flex;align-items:end}
+.card:hover{border-color:#e50914;transform:translateY(-2px);box-shadow:0 8px 24px rgba(229,9,20,.2)}
+.card-bg{position:absolute;inset:0;background-size:cover;background-position:center;transition:.25s}
+.card:hover .card-bg{transform:scale(1.05)}
+.card-overlay{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,.95) 0%,rgba(0,0,0,.4) 50%,rgba(0,0,0,.1) 100%)}
+.card-tag{position:absolute;top:10px;left:10px;background:#e50914;color:#fff;font-size:10px;font-weight:800;padding:4px 8px;border-radius:3px;letter-spacing:.04em;text-transform:uppercase}
+.card-body{position:relative;z-index:2;padding:14px;width:100%}
+.card-body .name{font-size:14px;font-weight:700;color:#fff;margin-bottom:2px;line-height:1.2}
+.card-body .hint{font-size:11px;color:#aaa}
 
-.steps{display:none;gap:6px;flex-direction:column;margin-bottom:18px}.steps.show{display:flex}.step{display:flex;align-items:center;gap:10px;font-size:12px;color:#555;padding:9px 12px;background:#0d0d0d;border-radius:6px;border-left:3px solid #1a1a1a}.step.done{color:#4caf50;border-left-color:#4caf50}.step.active{color:#e50914;border-left-color:#e50914;animation:pulse 1.5s infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}.step .dot{width:7px;height:7px;border-radius:50%;background:#333;flex-shrink:0}.step.done .dot{background:#4caf50}.step.active .dot{background:#e50914}
+.steps{display:none;gap:6px;flex-direction:column;margin-bottom:12px}
+.steps.show{display:flex}
+.step{display:flex;align-items:center;gap:10px;font-size:12px;color:#555;padding:9px 12px;background:#0d0d0d;border-radius:6px;border-left:3px solid #1a1a1a}
+.step.done{color:#4caf50;border-left-color:#4caf50}
+.step.active{color:#e50914;border-left-color:#e50914;animation:pulse 1.5s infinite}
+.step.error{color:#ff5555;border-left-color:#ff3333;background:#170909}
+.step.warn{color:#ffc45c;border-left-color:#c88418;background:#161107}
+.step .dot{width:7px;height:7px;border-radius:50%;background:#333;flex-shrink:0}
+.step.done .dot{background:#4caf50}
+.step.active .dot{background:#e50914}
+.step.error .dot{background:#ff3333}
+.step.warn .dot{background:#c88418}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 
-.result-card{display:none;background:#0c1b12;border:1px solid #1a5c2a;border-radius:10px;padding:28px 24px;text-align:center;margin-bottom:16px}.result-card.show{display:block}.result-code{font-size:58px;font-weight:900;letter-spacing:.1em;color:#4caf50;line-height:1;margin-bottom:6px}.result-link{font-size:14px;color:#4caf50;word-break:break-all;margin-bottom:6px;font-family:monospace}.result-label{font-size:13px;color:#7cb88a;margin-bottom:16px}.btn-row{display:flex;gap:8px}.btn-row button{flex:1}.copy-btn{background:#1a5c2a;color:#bff5cd;border:1px solid #2a7a3a;border-radius:6px;padding:12px 16px;font-weight:700;font-size:14px;cursor:pointer}.copy-btn:hover{background:#226b32}.open-btn{background:#0d3b6e;color:#b8d8ff;border:1px solid #1a4f8a;border-radius:6px;padding:12px 16px;font-weight:700;font-size:14px;cursor:pointer}.open-btn:hover{background:#124a85}.error-card{display:none;background:#1c0c0c;border:1px solid #7a1f1f;border-radius:8px;padding:16px;text-align:center;color:#f5bfbf;font-size:13px;margin-bottom:16px}.error-card.show{display:block}@media(max-width:540px){.wrap{padding:24px 14px}h1{font-size:24px}.result-code{font-size:44px}}
+.status-card{display:none;border:1px solid #333;background:#101010;border-radius:10px;padding:14px 16px;margin-bottom:16px}
+.status-card.show{display:block}
+.status-card.loading{border-color:#e50914;background:#18090a}
+.status-card.ok{border-color:#1a5c2a;background:#0c1b12}
+.status-card.warn{border-color:#7a5a1f;background:#1c160c}
+.status-card.error{border-color:#7a1f1f;background:#1c0c0c}
+.status-title{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#888;font-weight:900;margin-bottom:5px}
+.status-msg{font-size:13px;line-height:1.35;color:#eee}
+.status-detail{display:none;font-size:11px;line-height:1.35;color:#888;margin-top:8px;max-height:90px;overflow:auto;border-top:1px solid rgba(255,255,255,.08);padding-top:8px}
+
+.result-card{display:none;background:#0c1b12;border:1px solid #1a5c2a;border-radius:10px;padding:28px 24px;text-align:center;margin-bottom:16px}
+.result-card.show{display:block}
+.result-code{font-size:58px;font-weight:900;letter-spacing:.1em;color:#4caf50;line-height:1;margin-bottom:6px}
+.result-link{font-size:14px;color:#4caf50;word-break:break-all;margin-bottom:6px;font-family:monospace}
+.result-label{font-size:13px;color:#7cb88a;margin-bottom:16px}
+.btn-row{display:flex;gap:8px}
+.btn-row button{flex:1}
+.copy-btn{background:#1a5c2a;color:#bff5cd;border:1px solid #2a7a3a;border-radius:6px;padding:12px 16px;font-weight:700;font-size:14px;cursor:pointer}
+.open-btn{background:#0d3b6e;color:#b8d8ff;border:1px solid #1a4f8a;border-radius:6px;padding:12px 16px;font-weight:700;font-size:14px;cursor:pointer}
+.error-card{display:none;background:#1c0c0c;border:1px solid #7a1f1f;border-radius:8px;padding:16px;text-align:center;color:#f5bfbf;font-size:13px;margin-bottom:16px}
+.error-card.show{display:block}
+
+@media(max-width:540px){
+  .wrap{padding:24px 14px}
+  h1{font-size:24px}
+  .result-code{font-size:44px}
+}
+@media(max-width:420px){
+  .grid{grid-template-columns:1fr}
+  .field-box{flex-direction:column}
+  .field-box button{width:100%}
+}
 </style>
 </head>
+
 <body>
 <div class="wrap">
-<h1>Buscar Código</h1>
-<p class="sub">Informe o email para buscar códigos de acesso</p>
+  <h1>Buscar Código</h1>
+  <p class="sub">Informe o email para buscar códigos de acesso</p>
 
-<div class="field-box">
-  <input id="emailInput" type="email" placeholder="seuemail@outlook.com">
-  <button onclick="buscar('netflix_login')">Buscar</button>
-</div>
-
-<div class="steps" id="steps">
-  <div class="step" id="step1"><span class="dot"></span> Conectando ao Outlook...</div>
-  <div class="step" id="step2"><span class="dot"></span> Procurando email...</div>
-  <div class="step" id="step3"><span class="dot"></span> Extraindo código/link...</div>
-</div>
-
-<div class="result-card" id="resultCard">
-  <div class="result-code" id="resultCode"></div>
-  <div class="result-link" id="resultLink"></div>
-  <div class="result-label" id="resultLabel"></div>
-  <div class="btn-row">
-    <button class="copy-btn" id="copyBtn" onclick="copyResult()">Copiar</button>
-    <button class="open-btn" id="openBtn" onclick="openLink()" style="display:none">Abrir Link</button>
+  <div class="field-box">
+    <input id="emailInput" type="email" placeholder="seuemail@outlook.com">
+    <button id="mainBtn" onclick="buscar('netflix_login')">Buscar</button>
   </div>
-</div>
 
-<div class="error-card" id="errorCard"><span id="errorMsg"></span></div>
+  <div class="steps" id="steps">
+    <div class="step" id="stepOutlook"><span class="dot"></span> Abrindo Outlook...</div>
+    <div class="step" id="stepLogin"><span class="dot"></span> Preenchendo login Microsoft...</div>
+    <div class="step" id="stepInbox"><span class="dot"></span> Aguardando caixa de entrada...</div>
+    <div class="step" id="stepSearch"><span class="dot"></span> Procurando email da Netflix...</div>
+    <div class="step" id="stepExtract"><span class="dot"></span> Extraindo código/link...</div>
+  </div>
 
-<p class="section-title">Serviços Netflix</p>
-<div class="grid">
+  <div class="status-card" id="statusCard">
+    <div class="status-title" id="statusTitle">Status</div>
+    <div class="status-msg" id="statusMsg"></div>
+    <div class="status-detail" id="statusDetail"></div>
+  </div>
 
-  <div class="card" onclick="buscar('netflix_login')">
-    <div class="card-bg" style="background-image:url(https://highxtar.com/wp-content/uploads/2021/10/Highxtar-la-casa-de-papel-vol-2-0.jpeg)"></div>
-    <div class="card-overlay"></div>
-    <span class="card-tag">Netflix</span>
-    <div class="card-body">
-      <div class="name">Código de Login</div>
-      <div class="hint">4 dígitos — "Informe este código para entrar"</div>
+  <div class="result-card" id="resultCard">
+    <div class="result-code" id="resultCode"></div>
+    <div class="result-link" id="resultLink"></div>
+    <div class="result-label" id="resultLabel"></div>
+    <div class="btn-row">
+      <button class="copy-btn" id="copyBtn" onclick="copyResult()">Copiar</button>
+      <button class="open-btn" id="openBtn" onclick="openLink()" style="display:none">Abrir Link</button>
     </div>
   </div>
 
-  <div class="card" onclick="buscar('netflix_reset')">
-    <div class="card-bg" style="background-image:url(https://m.media-amazon.com/images/I/81TUfw3vc7L._AC_UF894,1000_QL80_.jpg)"></div>
-    <div class="card-overlay"></div>
-    <span class="card-tag">Netflix</span>
-    <div class="card-body">
-      <div class="name">Redefinir Senha</div>
-      <div class="hint">Link — "Vamos redefinir sua senha"</div>
-    </div>
+  <div class="error-card" id="errorCard">
+    <span id="errorMsg"></span>
   </div>
 
-  <div class="card" onclick="buscar('netflix_verify')">
-    <div class="card-bg" style="background-image:url(https://m.media-amazon.com/images/I/81kiMqZvm9L._AC_UF894,1000_QL80_.jpg)"></div>
-    <div class="card-overlay"></div>
-    <span class="card-tag">Netflix</span>
-    <div class="card-body">
-      <div class="name">Verificação</div>
-      <div class="hint">6 dígitos — "Confirme com o código"</div>
+  <p class="section-title">Serviços Netflix</p>
+
+  <div class="grid">
+    <div class="card" onclick="buscar('netflix_login')">
+      <div class="card-bg" style="background-image:url(https://highxtar.com/wp-content/uploads/2021/10/Highxtar-la-casa-de-papel-vol-2-0.jpeg)"></div>
+      <div class="card-overlay"></div>
+      <span class="card-tag">Netflix</span>
+      <div class="card-body">
+        <div class="name">Código de Login</div>
+        <div class="hint">4 dígitos — "Informe este código para entrar"</div>
+      </div>
+    </div>
+
+    <div class="card" onclick="buscar('netflix_reset')">
+      <div class="card-bg" style="background-image:url(https://m.media-amazon.com/images/I/81TUfw3vc7L._AC_UF894,1000_QL80_.jpg)"></div>
+      <div class="card-overlay"></div>
+      <span class="card-tag">Netflix</span>
+      <div class="card-body">
+        <div class="name">Redefinir Senha</div>
+        <div class="hint">Link — "Vamos redefinir sua senha"</div>
+      </div>
+    </div>
+
+    <div class="card" onclick="buscar('netflix_verify')">
+      <div class="card-bg" style="background-image:url(https://m.media-amazon.com/images/I/81kiMqZvm9L._AC_UF894,1000_QL80_.jpg)"></div>
+      <div class="card-overlay"></div>
+      <span class="card-tag">Netflix</span>
+      <div class="card-body">
+        <div class="name">Verificação</div>
+        <div class="hint">6 dígitos — "Confirme com o código"</div>
+      </div>
+    </div>
+
+    <div class="card" onclick="buscar('netflix_temp')">
+      <div class="card-bg" style="background-image:url(https://pbs.twimg.com/media/ES6jwLpUMAIqhK0.jpg)"></div>
+      <div class="card-overlay"></div>
+      <span class="card-tag">Netflix</span>
+      <div class="card-body">
+        <div class="name">Código Temporário</div>
+        <div class="hint">Link — "código de acesso temporário"</div>
+      </div>
+    </div>
+
+    <div class="card" onclick="buscar('netflix_house')">
+      <div class="card-bg" style="background-image:url(https://m.media-amazon.com/images/M/MV5BOTQzMzNmMzUtODgwNS00YTdhLTg5N2MtOWU1YTc4YWY3NjRlXkEyXkFqcGc@._V1_FMjpg_UX1000_.jpg)"></div>
+      <div class="card-overlay"></div>
+      <span class="card-tag">Netflix</span>
+      <div class="card-body">
+        <div class="name">Atualizar Residência</div>
+        <div class="hint">Link — "atualizar sua residência Netflix"</div>
+      </div>
     </div>
   </div>
-
-  <div class="card" onclick="buscar('netflix_temp')">
-    <div class="card-bg" style="background-image:url(https://pbs.twimg.com/media/ES6jwLpUMAIqhK0.jpg)"></div>
-    <div class="card-overlay"></div>
-    <span class="card-tag">Netflix</span>
-    <div class="card-body">
-      <div class="name">Código Temporário</div>
-      <div class="hint">Link — "código de acesso temporário"</div>
-    </div>
-  </div>
-
-  <div class="card" onclick="buscar('netflix_house')">
-    <div class="card-bg" style="background-image:url(https://m.media-amazon.com/images/M/MV5BOTQzMzNmMzUtODgwNS00YTdhLTg5N2MtOWU1YTc4YWY3NjRlXkEyXkFqcGc@._V1_FMjpg_UX1000_.jpg)"></div>
-    <div class="card-overlay"></div>
-    <span class="card-tag">Netflix</span>
-    <div class="card-body">
-      <div class="name">Atualizar Residência</div>
-      <div class="hint">Link — "atualizar sua residência Netflix"</div>
-    </div>
-  </div>
-
-</div>
 </div>
 
 <script>
 const API = window.location.origin;
 const SENHA = '02022013L';
 
-const step1 = document.getElementById('step1');
-const step2 = document.getElementById('step2');
-const step3 = document.getElementById('step3');
 const stepsDiv = document.getElementById('steps');
 const resultCard = document.getElementById('resultCard');
 const errorCard = document.getElementById('errorCard');
@@ -111,61 +182,272 @@ const resultLink = document.getElementById('resultLink');
 const resultLabel = document.getElementById('resultLabel');
 const copyBtn = document.getElementById('copyBtn');
 const openBtn = document.getElementById('openBtn');
+const statusCard = document.getElementById('statusCard');
+const statusTitle = document.getElementById('statusTitle');
+const statusMsg = document.getElementById('statusMsg');
+const statusDetail = document.getElementById('statusDetail');
+const mainBtn = document.getElementById('mainBtn');
+
+const stepEls = [
+  document.getElementById('stepOutlook'),
+  document.getElementById('stepLogin'),
+  document.getElementById('stepInbox'),
+  document.getElementById('stepSearch'),
+  document.getElementById('stepExtract')
+];
 
 let lastResult = '';
 let lastIsLink = false;
+let statusTimer = null;
+let isSearching = false;
+
+const STATUS_TITLES = {
+  idle: 'Aguardando',
+  saving_config: 'Preparando',
+  starting: 'Iniciando navegador',
+  opening_outlook: 'Abrindo Outlook',
+  checking_screen: 'Verificando tela',
+  email_step: 'Tela de email',
+  password_step: 'Tela de senha',
+  login_continue: 'Login Microsoft',
+  waiting_mailbox: 'Aguardando caixa de entrada',
+  mailbox_ready: 'Outlook entrou',
+  opening_inbox: 'Caixa de entrada',
+  searching: 'Procurando email',
+  email_opened: 'Email Netflix',
+  extracting: 'Extraindo',
+  found: 'Sucesso',
+  not_found: 'Não encontrado',
+  captcha: 'Captcha detectado',
+  protect_account: 'Proteção da conta',
+  extra_confirmation: 'Confirmação extra',
+  account_blocked: 'Conta bloqueada',
+  wrong_password: 'Senha incorreta',
+  email_not_found: 'Email inválido',
+  too_many_attempts: 'Muitas tentativas',
+  login_not_completed: 'Login não concluído',
+  mailbox_not_ready: 'Caixa não abriu',
+  config_error: 'Configuração',
+  service_error: 'Serviço inválido',
+  process_error: 'Erro'
+};
+
+const ERROR_CODES = new Set([
+  'captcha',
+  'protect_account',
+  'extra_confirmation',
+  'account_blocked',
+  'wrong_password',
+  'email_not_found',
+  'too_many_attempts',
+  'login_not_completed',
+  'mailbox_not_ready',
+  'config_error',
+  'service_error',
+  'process_error'
+]);
+
+const WARN_CODES = new Set(['not_found']);
+const OK_CODES = new Set(['mailbox_ready', 'found']);
+
+const STAGE_BY_CODE = {
+  idle: 0,
+  saving_config: 1,
+  starting: 1,
+  opening_outlook: 1,
+  checking_screen: 1,
+
+  email_step: 2,
+  password_step: 2,
+  login_continue: 2,
+  wrong_password: 2,
+  email_not_found: 2,
+  captcha: 2,
+  protect_account: 2,
+  extra_confirmation: 2,
+  account_blocked: 2,
+  too_many_attempts: 2,
+  login_not_completed: 2,
+
+  waiting_mailbox: 3,
+  mailbox_ready: 3,
+  opening_inbox: 3,
+  mailbox_not_ready: 3,
+
+  searching: 4,
+  email_opened: 4,
+  not_found: 4,
+
+  extracting: 5,
+  found: 6,
+
+  config_error: 1,
+  service_error: 1,
+  process_error: 1
+};
 
 function resetUI() {
   stepsDiv.classList.add('show');
   resultCard.classList.remove('show');
   errorCard.classList.remove('show');
-  [step1, step2, step3].forEach(s => { s.classList.remove('done','active'); });
+  statusCard.classList.remove('show', 'loading', 'ok', 'warn', 'error');
+  stepEls.forEach(s => s.classList.remove('done', 'active', 'error', 'warn'));
   lastResult = '';
   lastIsLink = false;
 }
 
-function setStep(el) { el.classList.add('active'); }
-function doneStep(el) { el.classList.remove('active'); el.classList.add('done'); }
+function statusType(code) {
+  if (ERROR_CODES.has(code)) return 'error';
+  if (WARN_CODES.has(code)) return 'warn';
+  if (OK_CODES.has(code)) return 'ok';
+  return 'loading';
+}
+
+function updateSteps(code) {
+  const stage = STAGE_BY_CODE[code] ?? 1;
+  const isError = ERROR_CODES.has(code);
+  const isWarn = WARN_CODES.has(code);
+
+  stepEls.forEach(s => s.classList.remove('done', 'active', 'error', 'warn'));
+
+  if (stage <= 0) return;
+
+  if (code === 'found') {
+    stepEls.forEach(s => s.classList.add('done'));
+    return;
+  }
+
+  const activeIndex = Math.min(Math.max(stage - 1, 0), stepEls.length - 1);
+
+  for (let i = 0; i < activeIndex; i++) {
+    stepEls[i].classList.add('done');
+  }
+
+  if (isError) {
+    stepEls[activeIndex].classList.add('error');
+  } else if (isWarn) {
+    stepEls[activeIndex].classList.add('warn');
+  } else {
+    stepEls[activeIndex].classList.add('active');
+  }
+}
+
+function showStatus(code, message, detail) {
+  const type = statusType(code || 'starting');
+
+  statusCard.classList.remove('loading', 'ok', 'warn', 'error');
+  statusCard.classList.add('show', type);
+
+  statusTitle.textContent = STATUS_TITLES[code] || 'Status';
+  statusMsg.textContent = message || 'Processando...';
+  statusDetail.textContent = detail || '';
+  statusDetail.style.display = detail ? '' : 'none';
+
+  updateSteps(code || 'starting');
+}
+
+function stopStatusPoll() {
+  if (statusTimer) {
+    clearInterval(statusTimer);
+    statusTimer = null;
+  }
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch(API + '/api/status', { cache: 'no-store' });
+    const data = await res.json();
+
+    if (data && data.message) {
+      showStatus(data.code, data.message, data.detail);
+    }
+  } catch (e) {}
+}
+
+function startStatusPoll() {
+  stopStatusPoll();
+  showStatus('starting', 'Iniciando busca...');
+  setTimeout(pollStatus, 700);
+  statusTimer = setInterval(pollStatus, 1500);
+}
+
+function setSearchingState(value) {
+  isSearching = value;
+  mainBtn.disabled = value;
+  mainBtn.textContent = value ? 'Buscando...' : 'Buscar';
+}
 
 async function buscar(serviceId) {
+  if (isSearching) return;
+
   const email = document.getElementById('emailInput').value.trim();
-  if (!email) { alert('Informe o email'); return; }
+
+  if (!email) {
+    alert('Informe o email');
+    return;
+  }
 
   resetUI();
+  setSearchingState(true);
+  showStatus('saving_config', 'Salvando email e preparando busca...');
 
-  setStep(step1);
   try {
-    await fetch(API + '/api/config', {
+    await fetch(API + '/api/status/reset', { method: 'POST' }).catch(() => {});
+
+    const cfg = await fetch(API + '/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, senha: SENHA })
     });
-  } catch(e) {}
-  doneStep(step1);
 
-  setStep(step2);
+    const cfgData = await cfg.json().catch(() => ({}));
+
+    if (cfgData && cfgData.error) {
+      throw new Error(cfgData.error);
+    }
+  } catch (e) {
+    setSearchingState(false);
+    showStatus('config_error', e.message || 'Erro ao salvar email/senha.');
+    showError(e.message || 'Erro ao salvar email/senha.');
+    return;
+  }
+
+  startStatusPoll();
+
   let data;
+
   try {
     const res = await fetch(API + '/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ service: serviceId })
     });
+
     data = await res.json();
-  } catch(e) {
+  } catch (e) {
+    stopStatusPoll();
+    setSearchingState(false);
+    showStatus('process_error', 'Erro de conexão com o servidor');
     showError('Erro de conexão com o servidor');
     return;
   }
-  doneStep(step2);
 
-  setStep(step3);
+  stopStatusPoll();
+  setSearchingState(false);
+
+  if (data && data.status) {
+    showStatus(data.status.code, data.status.message, data.status.detail);
+  }
+
   if (data && data.found && data.result) {
-    doneStep(step3);
+    showStatus('found', 'Entrou no Outlook e encontrou o resultado.');
     lastResult = data.result;
     lastIsLink = data.result.startsWith('http');
     showResult(data.result, data.service);
   } else {
-    showError(data?.error || 'Nenhum email encontrado. Verifique se o código já chegou.');
+    const msg = data?.error || 'Nenhum email encontrado. Verifique se o código já chegou.';
+    showStatus(data?.code || 'process_error', msg, data?.status?.detail || '');
+    showError(msg);
   }
 }
 
@@ -191,7 +473,7 @@ function showResult(result, service) {
 }
 
 function showError(msg) {
-  stepsDiv.classList.remove('show');
+  stepsDiv.classList.add('show');
   document.getElementById('errorMsg').textContent = msg;
   errorCard.classList.add('show');
 }
@@ -212,7 +494,9 @@ function openLink() {
 
 fetch(API + '/api/config')
   .then(r => r.json())
-  .then(d => { if (d.email) document.getElementById('emailInput').value = d.email; })
+  .then(d => {
+    if (d.email) document.getElementById('emailInput').value = d.email;
+  })
   .catch(() => {});
 </script>
 </body>
