@@ -999,7 +999,7 @@ button{background:#e50914;color:#fff;border:0;border-radius:8px;padding:12px 18p
 button:disabled{opacity:.55;cursor:not-allowed}
 .status{font-size:14px;line-height:1.4}
 .title{font-size:12px;text-transform:uppercase;color:#888;font-weight:900;margin-bottom:6px}
-.detail{color:#888;font-size:12px;margin-top:8px;white-space:pre-wrap;max-height:120px;overflow:auto;border-top:1px solid #222;padding-top:8px}
+.detail{color:#ff5555;font-size:12px;margin-top:8px;white-space:pre-wrap;max-height:120px;overflow:auto;border-top:1px solid #222;padding-top:8px}
 .screen{background:#000;border:1px solid #333;border-radius:12px;overflow:hidden;min-height:240px;display:flex;align-items:center;justify-content:center}
 .screen img{width:100%;display:block}
 .empty{color:#555;padding:30px;text-align:center}
@@ -1077,6 +1077,8 @@ async function startDebug() {
 async function poll() {
   try {
     const res = await fetch(API + '/api/debug-outlook/latest', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Erro no servidor: ' + res.status);
+    
     const data = await res.json();
 
     title.textContent = data.running ? 'Rodando' : 'Status';
@@ -1095,7 +1097,13 @@ async function poll() {
     }
 
     setButton(!!data.running);
-  } catch (e) {}
+  } catch (e) {
+    title.textContent = 'Erro de Conexão';
+    step.textContent = 'Não foi possível conectar à API. O servidor pode ter caído por falta de memória ou crashado no deploy.';
+    detail.style.display = 'block';
+    detail.textContent = e.message;
+    setButton(false);
+  }
 }
 
 function startPolling() {
