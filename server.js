@@ -285,11 +285,17 @@ async function setupPage(page) {
     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
   });
 
-  // Não bloqueia CSS, porque o Outlook às vezes depende do layout para carregar a lista.
   await page.setRequestInterception(true);
   page.on('request', (request) => {
     const type = request.resourceType();
-    if (type === 'image' || type === 'font' || type === 'media') {
+    const url = request.url().toLowerCase();
+    if (
+      type === 'image' || 
+      type === 'font' || 
+      type === 'media' ||
+      url.includes('telemetry') ||
+      url.includes('analytics')
+    ) {
       request.abort().catch(() => {});
     } else {
       request.continue().catch(() => {});
@@ -419,20 +425,8 @@ async function loginOutlook(page, email, senha) {
     }
 
     const clicked = await clickByVisibleText(page, [
-      'Entrar',
-      'Sign in',
-      'Próximo',
-      'Next',
-      'Sim',
-      'Yes',
-      'Continuar',
-      'Continue',
-      'Ignorar por enquanto',
-      'Skip for now',
-      'Talvez mais tarde',
-      'Maybe later',
-      'Agora não',
-      'Not now'
+      'Entrar', 'Sign in', 'Próximo', 'Next', 'Sim', 'Yes', 'Continuar', 'Continue',
+      'Ignorar por enquanto', 'Skip for now', 'Talvez mais tarde', 'Maybe later', 'Agora não', 'Not now'
     ]);
 
     if (clicked) {
@@ -443,10 +437,7 @@ async function loginOutlook(page, email, senha) {
     }
 
     const submit = await firstExisting(page, [
-      '#idSIButton9',
-      '#idSubmit_SAOTCC_Continue',
-      'input[type="submit"]',
-      'button[type="submit"]'
+      '#idSIButton9', '#idSubmit_SAOTCC_Continue', 'input[type="submit"]', 'button[type="submit"]'
     ]);
 
     if (submit) {
@@ -530,11 +521,8 @@ async function readEmailBody(page) {
 
   return page.evaluate(() => {
     const selectors = [
-      '[role="document"]',
-      '[aria-label*="Corpo"]',
-      '[aria-label*="Message body"]',
-      '[data-app-section="ReadingPane"]',
-      '[role="main"]'
+      '[role="document"]', '[aria-label*="Corpo"]', '[aria-label*="Message body"]',
+      '[data-app-section="ReadingPane"]', '[role="main"]'
     ];
 
     let best = '';
@@ -764,8 +752,6 @@ app.post('/api/search', async (req, res) => {
 });
 
 // ===== DEBUG VISUAL DO OUTLOOK =====
-// Abra /debug-outlook para ver prints do navegador entrando no Outlook.
-
 const DEBUG_DIR = path.join(__dirname, 'debug-outlook');
 
 try {
@@ -894,20 +880,8 @@ async function runOutlookVisualDebug() {
       }
 
       const clicked = await clickByVisibleText(page, [
-        'Entrar',
-        'Sign in',
-        'Próximo',
-        'Next',
-        'Sim',
-        'Yes',
-        'Continuar',
-        'Continue',
-        'Ignorar por enquanto',
-        'Skip for now',
-        'Talvez mais tarde',
-        'Maybe later',
-        'Agora não',
-        'Not now'
+        'Entrar', 'Sign in', 'Próximo', 'Next', 'Sim', 'Yes', 'Continuar', 'Continue',
+        'Ignorar por enquanto', 'Skip for now', 'Talvez mais tarde', 'Maybe later', 'Agora não', 'Not now'
       ]);
 
       if (clicked) {
@@ -918,10 +892,7 @@ async function runOutlookVisualDebug() {
       }
 
       const submit = await firstExisting(page, [
-        '#idSIButton9',
-        '#idSubmit_SAOTCC_Continue',
-        'input[type="submit"]',
-        'button[type="submit"]'
+        '#idSIButton9', '#idSubmit_SAOTCC_Continue', 'input[type="submit"]', 'button[type="submit"]'
       ]);
 
       if (submit) {
