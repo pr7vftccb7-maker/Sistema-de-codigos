@@ -1,18 +1,17 @@
 {
-  "name": "outlook-netflix-rpa",
-  "version": "1.0.0",
-  "description": "Busca códigos Netflix via Outlook com Puppeteer",
+  "name": "bklogins-netflix-extractor",
+  "version": "17.0.0",
+  "description": "BKLOGINS v17 SMART - Extrator de codigos/links Netflix via Outlook",
   "main": "server.js",
-  "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "npm install"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "express": "^4.21.0",
-    "puppeteer-core": "^23.0.0",
-    "@sparticuz/chromium": "^130.0.0"
-  },
-  "engines": {
-    "node": ">=18"
+    "puppeteer": "^23.0.0"
   }
 }
