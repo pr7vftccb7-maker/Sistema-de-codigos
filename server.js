@@ -14,7 +14,7 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname)));
 
 const CONFIG_FILE = path.join(__dirname, 'config.json');
-const PROFILE_DIR = path.join(__dirname, 'chrome-profile');
+const PROFILE_DIR = (process.env.RENDER || process.env.RAILWAY_ENVIRONMENT || process.env.IS_SERVER) ? "/tmp/chrome-profile" : path.join(__dirname, "chrome-profile");
 const COOKIES_FILE = path.join(__dirname, 'cookies.json');
 const SESSION_FILE = path.join(__dirname, 'session.json');
 
@@ -34,7 +34,12 @@ function setStatus(code, message, detail) {
 function keepAlive() { if (!APP_URL) return; setInterval(() => { https.get(APP_URL + '/api/ping', () => {}).on('error', () => {}); }, 4 * 60 * 1000); }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+
 // ============ SERVICE PATTERNS COM PALAVRAS-CHAVE POR TIPO ============
+// Cada servico tem:
+//   subjectKeywords: palavras que DEVEM aparecer no assunto (regex)
+//   bodyKeywords: palavras que DEVEM aparecer no corpo (regex)
+//   blockedSubjects/blockedBody: palavras que BLOQUEIAM (ex: "alteração da sua conta" = mudar email)
 const SERVICE_PATTERNS = {
   netflix_login: {
     type: 'code',
@@ -93,25 +98,40 @@ const BLOCKED_EMAIL_PATTERNS = [
   /confirme.*novo.*email/i
 ];
 
+
+function isServer() { return !!process.env.RENDER || !!process.env.RAILWAY_ENVIRONMENT || !!process.env.IS_SERVER; }
 function findChrome() {
+  // Servidor (Render/Railway): deixa Puppeteer usar o Chromium próprio
+  if (isServer()) return null;
   const paths = ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe','C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',(process.env.LOCALAPPDATA||'')+'\\Google\\Chrome\\Application\\chrome.exe','/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',process.env.CHROME_PATH].filter(Boolean);
   for (const p of paths) { if (fs.existsSync(p)) return p; }
   return null;
 }
-function isServer() { return !!process.env.RENDER || !!process.env.RAILWAY_ENVIRONMENT || !!process.env.IS_SERVER; }
 
 async function launchBrowser() {
   const chromePath = findChrome();
   const headless = isServer();
   const opts = {
     headless: headless ? 'new' : false,
-    args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu','--start-maximized'],
+    args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu','--disable-extensions','--disable-background-networking','--disable-sync','--no-first-run','--no-zygote','--single-process'],
     defaultViewport: headless ? { width: 1920, height: 1080 } : null,
     userDataDir: PROFILE_DIR
   };
-  if (chromePath && !isServer()) opts.executablePath = chromePath;
+  
+  // Local: usa Chrome do sistema. Servidor: usa Chromium do Puppeteer ou PUPPETEER_EXECUTABLE_PATH
+  if (chromePath) {
+    opts.executablePath = chromePath;
+  } else if (isServer()) {
+    // No Render, o Puppeteer já baixa Chromium pra /opt/render/.cache/puppeteer
+    // ou use PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    opts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+    opts.args.push('--disable-features=TranslateUI', '--disable-component-update');
+  }
+  
   return puppeteer.launch(opts);
 }
+
+
 
 async function isInboxReady(page) {
   try {
@@ -251,6 +271,7 @@ function isEmailBlocked(subject, body) {
 
 // ============ VERIFICA SE O EMAIL CORRESPONDE AO SERVICO ============
 function emailMatchesService(subject, body, svc) {
+  // Primeiro checa bloqueios especificos do servico
   if (svc.blockedSubjects && svc.blockedSubjects.test(subject)) {
     console.log('[Match] Assunto bloqueado:', subject.slice(0, 100));
     return false;
@@ -260,17 +281,21 @@ function emailMatchesService(subject, body, svc) {
     return false;
   }
 
+  // Checa keywords de assunto (mais peso)
   const subjectMatch = svc.subjectKeywords.test(subject);
+  // Checa keywords de corpo
   const bodyMatch = svc.bodyKeywords.test(body);
 
   console.log('[Match] Subject:', subject.slice(0, 80), '| match:', subjectMatch);
   console.log('[Match] Body:', body.slice(0, 80), '| match:', bodyMatch);
 
+  // Precisa bater pelo menos assunto OU corpo
   return subjectMatch || bodyMatch;
 }
 
 // ============ NAVEGA PELOS EMAILS DE "OUTROS" ATE ACHAR O CERTO ============
 async function findCorrectEmail(page, svc) {
+  // Clica em Outros
   console.log('[Busca] Clicando Outros...');
   const clickedOutros = await page.evaluate(() => {
     const els = Array.from(document.querySelectorAll('button, span, div[role="button"], a'));
@@ -287,6 +312,7 @@ async function findCorrectEmail(page, svc) {
 
   await sleep(4000);
 
+  // Conta quantos emails tem na lista
   const emailCount = await page.evaluate(() => {
     const sels = ['div[data-convid]', '[role="option"]', '[role="listitem"]', 'div[data-testid="message-item"]', '.eeumf'];
     for (const sel of sels) {
@@ -303,12 +329,13 @@ async function findCorrectEmail(page, svc) {
     return false;
   }
 
-  const MAX_EMAILS = Math.min(emailCount, 15);
+  const MAX_EMAILS = Math.min(emailCount, 15); // maximo 15 emails pra nao travar
 
   for (let i = 0; i < MAX_EMAILS; i++) {
     setStatus('scanning', 'Analisando email ' + (i + 1) + ' de ' + MAX_EMAILS + '...');
     console.log('[Busca] --- Email ' + (i + 1) + '/' + MAX_EMAILS + ' ---');
 
+    // Clica no email i
     const clicked = await page.evaluate((idx) => {
       const sels = ['div[data-convid]', '[role="option"]', '[role="listitem"]', 'div[data-testid="message-item"]', '.eeumf'];
       for (const sel of sels) {
@@ -325,6 +352,7 @@ async function findCorrectEmail(page, svc) {
 
     await sleep(4000);
 
+    // Le assunto
     const subject = await getEmailSubject(page);
     console.log('[Busca] Assunto:', subject.slice(0, 100));
 
@@ -333,10 +361,11 @@ async function findCorrectEmail(page, svc) {
       continue;
     }
 
+    // Le corpo
     const body = await getEmailBody(page);
     console.log('[Busca] Corpo (primeiros 150):', body.slice(0, 150));
 
-    // ⛔ BLOQUEIO: email de alteração de conta
+    // ⛔ Verifica se é email de "alteração de conta" → PULA
     if (isEmailBlocked(subject, body)) {
       console.log('[Busca] ⛔ Email BLOQUEADO (alteracao de conta), pulando...');
       continue;
@@ -351,16 +380,17 @@ async function findCorrectEmail(page, svc) {
     console.log('[Busca] Email nao corresponde, indo pro proximo...');
   }
 
-  console.log('[Busca] Nenhum email correspondente em', MAX_EMAILS, 'tentativas.');
+  console.log('[Busca] Nenhum email correspondente encontrado em', MAX_EMAILS, 'tentativas.');
   return false;
 }
 
-// ============ EXTRAI LINKS DO EMAIL ============
 async function extractLinksFromEmail(page) {
   return await page.evaluate(() => {
     const links = [];
 
+    // Funcao auxiliar: pega todos os links de um documento
     function collectLinks(doc, source) {
+      // 1. Tags <a> com href
       for (const a of doc.querySelectorAll('a')) {
         const href = (a.href || '').trim();
         if (href && !href.startsWith('javascript:') && href !== '#' && !href.startsWith('mailto:')) {
@@ -373,6 +403,7 @@ async function extractLinksFromEmail(page) {
         }
       }
 
+      // 2. Botoes/divs com onclick redirecionando
       for (const el of doc.querySelectorAll('button, [role="button"], div[onclick], td[onclick]')) {
         const onclick = el.getAttribute('onclick') || '';
         const urlMatch = onclick.match(/(?:location\.href|window\.open|window\.location)\s*=\s*['"]([^'"]+)['"]/);
@@ -386,13 +417,20 @@ async function extractLinksFromEmail(page) {
         }
       }
 
+      // 3. Elementos com background-color vermelho (botao da Netflix)
       for (const el of doc.querySelectorAll('a, td, div, span, button')) {
         const bg = getComputedStyleRed(el);
         if (bg && !links.some(l => l.href === (el.href || ''))) {
           const href = (el.href || '').trim();
           if (href && !href.startsWith('javascript:') && href !== '#' && !href.startsWith('mailto:')) {
-            links.push({ href, text: (el.innerText || el.textContent || '').trim().slice(0, 100), color: bg, source: source + '-redbtn' });
+            links.push({
+              href: href,
+              text: (el.innerText || el.textContent || '').trim().slice(0, 100),
+              color: bg,
+              source: source + '-redbtn'
+            });
           }
+          // Se for um td/div/span vermelho com um <a> filho, ja foi pego acima
         }
       }
     }
@@ -402,52 +440,67 @@ async function extractLinksFromEmail(page) {
         const style = window.getComputedStyle(el);
         const bg = style.backgroundColor;
         if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') return null;
+        // Extrai R, G, B
         const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
         if (!m) return null;
         const r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+        // Se for vermelho dominante (R > 150, R > G*1.5, R > B*1.5)
         if (r > 150 && r > g * 1.5 && r > b * 1.5) return bg;
         return null;
       } catch(e) { return null; }
     }
 
+    // === COLETA NO DOCUMENTO PRINCIPAL ===
     collectLinks(document, 'main');
 
+    // === COLETA NOS IFRAMES (onde o email renderiza) ===
     const iframes = document.querySelectorAll('iframe');
     for (const iframe of iframes) {
       try {
         const doc = iframe.contentDocument || iframe.contentWindow.document;
-        if (doc && doc.body) collectLinks(doc, 'iframe');
-      } catch(e) {}
+        if (doc && doc.body) {
+          collectLinks(doc, 'iframe');
+        }
+      } catch(e) {
+        // Cross-origin iframe — tenta pelo sandbox
+      }
     }
 
     return links;
   });
 }
 
+// ============ NOVA FUNCAO: Encontra link relevante da Netflix ============
 function pickNetflixLink(links) {
   if (!links || links.length === 0) return null;
 
   console.log('[LinkExtract] Total de links encontrados:', links.length);
 
+  // Prioridade 1: Link do botao VERMELHO (a Netflix usa botao #e50914 ou similar)
   const redLinks = links.filter(l => l.color);
   console.log('[LinkExtract] Links vermelhos:', redLinks.length);
   if (redLinks.length > 0) {
     for (const l of redLinks) {
       console.log('[LinkExtract] Link vermelho:', l.href.slice(0, 150), '| texto:', l.text);
     }
+    // Link vermelho + contem "netflix" no href
     const redNetflix = redLinks.find(l => /netflix/i.test(l.href));
     if (redNetflix) return redNetflix.href;
+    // Se nenhum tem netflix no href, pega o primeiro vermelho (pode ser link tracking)
     return redLinks[0].href;
   }
 
+  // Prioridade 2: Link com "netflix.com" no href
   const netflixLinks = links.filter(l => /netflix\.com/i.test(l.href));
   console.log('[LinkExtract] Links com netflix.com:', netflixLinks.length);
   if (netflixLinks.length > 0) {
+    // Prefere links de reset/update/verify
     const resetLink = netflixLinks.find(l => /reset|redefin|password|senha|update|atualizar|verify|confirm/i.test(l.href + l.text));
     if (resetLink) return resetLink.href;
     return netflixLinks[0].href;
   }
 
+  // Prioridade 3: Link tracking da Netflix (click.email.netflix.com, links.email.netflix.com, etc.)
   const trackingLinks = links.filter(l => 
     /netflix/i.test(l.href) || 
     /email\.flix/i.test(l.href) ||
@@ -455,22 +508,29 @@ function pickNetflixLink(links) {
   );
   if (trackingLinks.length > 0) return trackingLinks[0].href;
 
+  // Prioridade 4: Safelinks da Microsoft (links.protection.outlook.com) que contenham Netflix
   const safelinks = links.filter(l => /safelinks\.protection\.outlook\.com/i.test(l.href) && /netflix/i.test(l.href));
   if (safelinks.length > 0) return safelinks[0].href;
 
+  // Prioridade 5: Qualquer link com texto mencionando Netflix
   const textNetflix = links.find(l => /netflix/i.test(l.text));
   if (textNetflix) return textNetflix.href;
 
+  // Prioridade 6: Primeiro link de botao/acao (provavelmente o principal do email)
   const actionLinks = links.filter(l => 
     /verify|confirm|reset|update|click|acessar|entrar|acesse|clique|redefinir|atualizar/i.test(l.text)
   );
   if (actionLinks.length > 0) return actionLinks[0].href;
 
+  // Desespero: primeiro link
   return links[0].href;
 }
 
+// ============ NOVA FUNCAO: Clica no botao vermelho dentro do email ============
 async function clickRedButtonInEmail(page) {
+  // Tenta clicar no botao vermelho dentro do painel de leitura/iframe
   return await page.evaluate(() => {
+    // Funcao pra detectar vermelho
     function isRed(el) {
       try {
         const bg = window.getComputedStyle(el).backgroundColor;
@@ -482,18 +542,22 @@ async function clickRedButtonInEmail(page) {
       } catch(e) { return false; }
     }
 
+    // Procura no documento principal
     const candidates = Array.from(document.querySelectorAll('a, button, [role="button"], td, div, span'));
     for (const el of candidates) {
       if (isRed(el)) {
+        // Se for um td/div, procura o <a> filho
         const link = el.tagName === 'A' ? el : el.querySelector('a');
         if (link && link.href && !link.href.startsWith('javascript:')) {
           return { clicked: true, href: link.href, where: 'main' };
         }
+        // Se nao tem link filho, clica no elemento
         el.click();
         return { clicked: true, href: 'clicked-no-href', where: 'main-click' };
       }
     }
 
+    // Procura nos iframes
     const iframes = document.querySelectorAll('iframe');
     for (const iframe of iframes) {
       try {
@@ -518,117 +582,56 @@ async function clickRedButtonInEmail(page) {
   });
 }
 
+
+
 // ============ FUNCAO PRINCIPAL - EXTRACAO (v17 SMART) ============
 async function findNetflixResult(page, svc) {
-  // Passo 1: Navegar entre os emails de Outros ate achar o certo
   const found = await findCorrectEmail(page, svc);
+  if (!found) return null;
 
-  if (!found) {
-    return null;
-  }
-
-  // ===== EXTRAI CODIGO =====
   if (svc.type === 'code') {
-    console.log('[Busca] Procurando codigo no email...');
+    console.log('[Busca] Procurando codigo...');
     setStatus('extracting_code', 'Extraindo codigo...');
-
     const codigo = await page.evaluate(() => {
       let texto = '';
-      const painelSelectors = [
-        '[aria-label*="Corpo da mensagem" i]',
-        '[aria-label*="Message body" i]',
-        '[role="document"]',
-        'div[class*="readingPane" i]',
-        'div[class*="message-body" i]',
-        'div[class*="email-body" i]',
-        'div[data-app-section="ReadingPane"]',
-        '#readingPaneContainer'
-      ];
-      for (const sel of painelSelectors) {
-        const el = document.querySelector(sel);
-        if (el && el.innerText && el.innerText.trim().length > 5) { texto = el.innerText; break; }
-      }
-      if (!texto) {
-        const iframes = document.querySelectorAll('iframe');
-        for (const iframe of iframes) {
-          try {
-            const doc = iframe.contentDocument || iframe.contentWindow.document;
-            if (doc && doc.body && doc.body.innerText.trim().length > 5) { texto = doc.body.innerText; break; }
-          } catch(e) {}
-        }
-      }
+      const sels = ['[aria-label*="Corpo da mensagem" i]','[aria-label*="Message body" i]','[role="document"]','div[class*="readingPane" i]','div[class*="message-body" i]','div[class*="email-body" i]','div[data-app-section="ReadingPane"]','#readingPaneContainer'];
+      for (const sel of sels) { const el = document.querySelector(sel); if (el && el.innerText && el.innerText.trim().length > 5) { texto = el.innerText; break; } }
+      if (!texto) { const iframes = document.querySelectorAll('iframe'); for (const iframe of iframes) { try { const doc = iframe.contentDocument || iframe.contentWindow.document; if (doc && doc.body && doc.body.innerText.trim().length > 5) { texto = doc.body.innerText; break; } } catch(e) {} } }
       if (!texto) return null;
-      console.log('[Browser] Texto:', texto.slice(0, 300));
-
       let m = texto.match(/(?:codigo|code|informe|digite|entrar|enter|acima|c.digo).{0,80}?(\d{4})(?!\d)/i);
       if (!m) m = texto.match(/(?:codigo|code|informe|digite|entrar|enter|acima|c.digo).{0,80}?(\d{6})(?!\d)/i);
       if (!m) m = texto.match(/(?:netflix).{0,100}?(\d{4})(?!\d)/i);
       if (!m) m = texto.match(/(?:netflix).{0,100}?(\d{6})(?!\d)/i);
-      if (!m) {
-        const regex = /\b(\d{4})\b/g;
-        let match;
-        while ((match = regex.exec(texto)) !== null) {
-          if (!match[1].startsWith('20') && !match[1].startsWith('19')) { m = match; break; }
-        }
-      }
+      if (!m) { const regex = /\b(\d{4})\b/g; let match; while ((match = regex.exec(texto)) !== null) { if (!match[1].startsWith('20') && !match[1].startsWith('19')) { m = match; break; } } }
       if (!m) m = texto.match(/\b(\d{6})\b/);
       return m ? m[1] : null;
     });
-
-    if (codigo) {
-      console.log('[Busca] CODIGO:', codigo);
-      setStatus('found', 'Codigo: ' + codigo);
-      return { type: 'code', value: codigo, label: svc.label };
-    }
-    console.log('[Busca] Nenhum codigo encontrado.');
+    if (codigo) { setStatus('found', 'Codigo: ' + codigo); return { type: 'code', value: codigo, label: svc.label }; }
+    console.log('[Busca] Nenhum codigo.');
   }
 
-  // ===== EXTRAI LINK =====
   if (svc.type === 'link') {
     console.log('[Busca] Procurando link...');
-
     setStatus('clicking_button', 'Clicando no botao vermelho...');
     const urlBefore = page.url();
     const clickResult = await clickRedButtonInEmail(page);
-    console.log('[Busca] Clique:', JSON.stringify(clickResult));
-
     if (clickResult.clicked) {
       await sleep(3000);
       const pages = await page.browser().pages();
       const newPage = pages.find(p => p.url() !== urlBefore && p.url() !== 'about:blank');
-      if (newPage) {
-        const newUrl = newPage.url();
-        console.log('[Busca] Nova pagina:', newUrl);
-        try { await newPage.close(); } catch(e) {}
-        if (newUrl && !newUrl.includes('outlook.live.com')) {
-          setStatus('found', 'Link extraido do botao!');
-          return { type: 'link', value: newUrl, label: svc.label };
-        }
-      }
-      if (clickResult.href && clickResult.href !== 'clicked-no-href' && clickResult.href.startsWith('http')) {
-        console.log('[Busca] Link do botao:', clickResult.href);
-        setStatus('found', 'Link do botao vermelho!');
-        return { type: 'link', value: clickResult.href, label: svc.label };
-      }
+      if (newPage) { const newUrl = newPage.url(); try { await newPage.close(); } catch(e) {} if (newUrl && !newUrl.includes('outlook.live.com')) { setStatus('found', 'Link extraido!'); return { type: 'link', value: newUrl, label: svc.label }; } }
+      if (clickResult.href && clickResult.href !== 'clicked-no-href' && clickResult.href.startsWith('http')) { setStatus('found', 'Link do botao!'); return { type: 'link', value: clickResult.href, label: svc.label }; }
     }
-
     setStatus('extracting_links', 'Extraindo links...');
     const links = await extractLinksFromEmail(page);
     const bestLink = pickNetflixLink(links);
-    if (bestLink) {
-      console.log('[Busca] Melhor link:', bestLink);
-      setStatus('found', 'Link encontrado!');
-      return { type: 'link', value: bestLink, label: svc.label };
-    }
-
+    if (bestLink) { setStatus('found', 'Link encontrado!'); return { type: 'link', value: bestLink, label: svc.label }; }
     try { await page.screenshot({ path: path.join(__dirname, 'debug-email.png'), fullPage: false }); } catch(e) {}
-    console.log('[Busca] Nenhum link encontrado.');
+    console.log('[Busca] Nenhum link.');
   }
-
   return null;
 }
 
-// ROTAS
 app.post('/api/logout', (req, res) => {
   try {
     if (fs.existsSync(COOKIES_FILE)) fs.unlinkSync(COOKIES_FILE);
