@@ -52,14 +52,13 @@ async function backupCookiesToTelegram() {
 
 function getCookieFile(email) { return '/tmp/cookies_' + (email || '').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40) + '.json'; }
 
-// ====== COOKIES: Carrega do repo (GitHub) + /tmp ======
+// ====== COOKIES ======
 function loadAllCookies() {
   let all = {};
   try { if (fs.existsSync(COOKIES_REPO_FILE)) { all = JSON.parse(fs.readFileSync(COOKIES_REPO_FILE, 'utf8')); console.log('[cookies] Carregado do repo:', Object.keys(all).length, 'contas'); } } catch(e) { console.log('[cookies] Erro repo:', e.message); }
   try { if (fs.existsSync(ALL_COOKIES_FILE)) { const tmp = JSON.parse(fs.readFileSync(ALL_COOKIES_FILE, 'utf8')); for (const k of Object.keys(tmp)) { if (!all[k]) all[k] = tmp[k]; } } } catch(e) {}
   return all;
 }
-
 function saveAllCookies(data) {
   fs.writeFileSync(ALL_COOKIES_FILE, JSON.stringify(data));
   try { fs.writeFileSync(COOKIES_REPO_FILE, JSON.stringify(data)); console.log('[cookies] Salvo no repo:', Object.keys(data).length, 'contas'); } catch(e) { console.log('[cookies] Erro ao salvar repo:', e.message); }
@@ -77,8 +76,8 @@ async function saveCookies(page, email) {
 }
 
 async function loadCookies(page, email) {
-  try { const f = getCookieFile(email); if (fs.existsSync(f)) { const c = JSON.parse(fs.readFileSync(f, 'utf8')); if (c.length > 0) { await page.setCookie(...c); addLog('Cookies carregados do /tmp'); return true; } } } catch(e) {}
-  try { const all = loadAllCookies(); if (all[email] && all[email].cookies && all[email].cookies.length > 0) { await page.setCookie(...all[email].cookies); addLog('Cookies carregados do repo/all'); return true; } } catch(e) {}
+  try { const f = getCookieFile(email); if (fs.existsSync(f)) { const c = JSON.parse(fs.readFileSync(f, 'utf8')); if (c.length > 0) { await page.setCookie(...c); addLog('Cookies do /tmp'); return true; } } } catch(e) {}
+  try { const all = loadAllCookies(); if (all[email] && all[email].cookies && all[email].cookies.length > 0) { await page.setCookie(...all[email].cookies); addLog('Cookies do repo'); return true; } } catch(e) {}
   return false;
 }
 
@@ -105,29 +104,37 @@ async function launchBrowser() {
 }
 
 function isInbox(page) {
-  return page.evaluate(() => /caixa de entrada|inbox|novo email/i.test((document.body.innerText || '').toLowerCase()) && /outlook\.(live|office)\.com\/mail/i.test(location.href));
+  try {
+    return page.evaluate(() => {
+      try {
+        const txt = (document.body && document.body.innerText || '').toLowerCase();
+        return /caixa de entrada|inbox|novo email/i.test(txt) && /outlook\.(live|office)\.com\/mail/i.test(location.href);
+      } catch(_) { return false; }
+    });
+  } catch(_) { return false; }
 }
 
 async function doLogin(page, email, senha) {
-  await page.goto('https://login.live.com/login.srf', { waitUntil: 'load', timeout: 120000 });
-  await sleep(4000);
+  addLog('Iniciando login...');
+  await page.goto('https://login.live.com/login.srf', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await sleep(5000);
 
   setStatus('email_step', 'Email...');
+  let typed = false;
   const emailSels = ['input[type="email"]', 'input[name="loginfmt"]', 'input[placeholder*="email" i]', 'input[placeholder*="Email"]'];
-  let ok = false;
   for (const s of emailSels) {
-    try { await page.waitForSelector(s, { timeout: 5000 }); await page.click(s); await page.keyboard.type(email, { delay: 30 }); addLog('Email: ' + s); ok = true; break; } catch(e) {}
+    try { await page.waitForSelector(s, { timeout: 5000 }); await page.click(s); await page.keyboard.type(email, { delay: 30 }); addLog('Email: ' + s); typed = true; break; } catch(e) {}
   }
-  if (!ok) { await page.screenshot({ path: '/tmp/debug-email.png' }); throw new Error('Campo email ausente'); }
+  if (!typed) { await page.screenshot({ path: '/tmp/debug-email.png' }); throw new Error('Campo email ausente'); }
   await sleep(500); await page.keyboard.press('Enter'); await sleep(6000);
 
   setStatus('password_step', 'Senha...');
+  let passTyped = false;
   const passSels = ['input[type="password"]', 'input[name="passwd"]', 'input[placeholder*="senha" i]', 'input[placeholder*="password" i]'];
-  ok = false;
   for (const s of passSels) {
-    try { await page.waitForSelector(s, { timeout: 5000 }); await page.click(s); await page.keyboard.type(senha, { delay: 30 }); addLog('Senha: ' + s); ok = true; break; } catch(e) {}
+    try { await page.waitForSelector(s, { timeout: 5000 }); await page.click(s); await page.keyboard.type(senha, { delay: 30 }); addLog('Senha: ' + s); passTyped = true; break; } catch(e) {}
   }
-  if (!ok) { await page.screenshot({ path: '/tmp/debug-senha.png' }); throw new Error('Campo senha ausente'); }
+  if (!passTyped) { await page.screenshot({ path: '/tmp/debug-senha.png' }); throw new Error('Campo senha ausente'); }
   await sleep(500); await page.keyboard.press('Enter'); await sleep(6000);
   try { await page.waitForSelector('input[type="submit"], button[value="Yes"], button[value="Sim"]', { timeout: 5000 }); await page.keyboard.press('Enter'); await sleep(3000); } catch(e) {}
 }
@@ -256,22 +263,17 @@ async function findNetflixResult(page, svc) {
 
 // ============ API ============
 
-// 🍪 Recarrega cookies do repo (se atualizou manualmente)
+// 🍪 Recarrega cookies
 app.post('/api/cookies/reload', (req, res) => {
-  try {
-    const all = loadAllCookies();
-    res.json({ ok: true, contas: Object.keys(all).length, emails: Object.keys(all) });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  try { const all = loadAllCookies(); res.json({ ok: true, contas: Object.keys(all).length, emails: Object.keys(all) }); } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// 🍪 Salva cookies manualmente via API
+// 🍪 Salva cookies via API
 app.post('/api/cookies/save', (req, res) => {
   try {
     const { email, cookies: cookieData } = req.body || {};
     if (!email || !cookieData) return res.status(400).json({ error: 'email e cookies obrigatorios' });
-    const all = loadAllCookies();
-    all[email] = { cookies: cookieData, savedAt: new Date().toISOString() };
-    saveAllCookies(all);
+    const all = loadAllCookies(); all[email] = { cookies: cookieData, savedAt: new Date().toISOString() }; saveAllCookies(all);
     res.json({ ok: true, contas: Object.keys(all).length });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
