@@ -51,17 +51,14 @@ async function backupCookiesToTelegram() {
 }
 
 function getCookieFile(email) { return '/tmp/cookies_' + (email || '').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40) + '.json'; }
-
-// ====== COOKIES ======
 function loadAllCookies() {
   let all = {};
-  try { if (fs.existsSync(COOKIES_REPO_FILE)) { all = JSON.parse(fs.readFileSync(COOKIES_REPO_FILE, 'utf8')); console.log('[cookies] Carregado do repo:', Object.keys(all).length, 'contas'); } } catch(e) { console.log('[cookies] Erro repo:', e.message); }
-  try { if (fs.existsSync(ALL_COOKIES_FILE)) { const tmp = JSON.parse(fs.readFileSync(ALL_COOKIES_FILE, 'utf8')); for (const k of Object.keys(tmp)) { if (!all[k]) all[k] = tmp[k]; } } } catch(e) {}
-  return all;
-}
+  try { if (fs.existsSync(COOKIES_REPO_FILE)) { all = JSON.parse(fs.readFileSync(COOKIES_REPO_FILE, "utf8")); console.log("[cookies] Repo:", Object.keys(all).length); } } catch(e) {}
+  try { if (fs.existsSync(ALL_COOKIES_FILE)) { const tmp = JSON.parse(fs.readFileSync(ALL_COOKIES_FILE, "utf8")); for (const k of Object.keys(tmp)) { if (!all[k]) all[k] = tmp[k]; } } } catch(e) {}
+  return all; try { if (fs.existsSync(ALL_COOKIES_FILE)) return JSON.parse(fs.readFileSync(ALL_COOKIES_FILE, 'utf8')); } catch(e) {} return {}; }
 function saveAllCookies(data) {
   fs.writeFileSync(ALL_COOKIES_FILE, JSON.stringify(data));
-  try { fs.writeFileSync(COOKIES_REPO_FILE, JSON.stringify(data)); console.log('[cookies] Salvo no repo:', Object.keys(data).length, 'contas'); } catch(e) { console.log('[cookies] Erro ao salvar repo:', e.message); }
+  try { fs.writeFileSync(COOKIES_REPO_FILE, JSON.stringify(data)); console.log("[cookies] Salvo repo:", Object.keys(data).length); } catch(e) {}
 }
 
 async function saveCookies(page, email) {
@@ -76,8 +73,8 @@ async function saveCookies(page, email) {
 }
 
 async function loadCookies(page, email) {
-  try { const f = getCookieFile(email); if (fs.existsSync(f)) { const c = JSON.parse(fs.readFileSync(f, 'utf8')); if (c.length > 0) { await page.setCookie(...c); addLog('Cookies do /tmp'); return true; } } } catch(e) {}
-  try { const all = loadAllCookies(); if (all[email] && all[email].cookies && all[email].cookies.length > 0) { await page.setCookie(...all[email].cookies); addLog('Cookies do repo'); return true; } } catch(e) {}
+  try { const f = getCookieFile(email); if (fs.existsSync(f)) { const c = JSON.parse(fs.readFileSync(f, 'utf8')); if (c.length > 0) { await page.setCookie(...c); return true; } } } catch(e) {}
+  try { const all = loadAllCookies(); if (all[email] && all[email].cookies) { await page.setCookie(...all[email].cookies); return true; } } catch(e) {}
   return false;
 }
 
@@ -105,39 +102,37 @@ async function launchBrowser() {
 
 function isInbox(page) {
   try {
-    return page.evaluate(() => {
-      try {
-        const txt = (document.body && document.body.innerText || '').toLowerCase();
-        return /caixa de entrada|inbox|novo email/i.test(txt) && /outlook\.(live|office)\.com\/mail/i.test(location.href);
-      } catch(_) { return false; }
-    });
-  } catch(_) { return false; }
+  return page.evaluate(() => { try { const b = document.body; if (!b) return false; return /caixa de entrada|inbox|novo email/i.test((document.body.innerText || '').toLowerCase()) && /outlook\.(live|office)\.com\/mail/i.test(location.href)); } catch(_) { return false; } }); } catch(_) { return false; }
 }
 
 async function doLogin(page, email, senha) {
-  addLog('Iniciando login...');
-  await page.goto('https://login.live.com/login.srf', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await sleep(5000);
+  // Vai pra pagina de login
+  await page.goto('https://login.live.com/login.srf', { waitUntil: 'load', timeout: 120000 });
+  await sleep(4000);
 
+  // Email - tenta varios seletores
   setStatus('email_step', 'Email...');
-  let typed = false;
   const emailSels = ['input[type="email"]', 'input[name="loginfmt"]', 'input[placeholder*="email" i]', 'input[placeholder*="Email"]'];
+  let ok = false;
   for (const s of emailSels) {
-    try { await page.waitForSelector(s, { timeout: 5000 }); await page.click(s); await page.keyboard.type(email, { delay: 30 }); addLog('Email: ' + s); typed = true; break; } catch(e) {}
+    try { await page.waitForSelector(s, { timeout: 5000 }); await page.click(s); await page.keyboard.type(email, { delay: 30 }); addLog('Email: ' + s); ok = true; break; } catch(e) {}
   }
-  if (!typed) { await page.screenshot({ path: '/tmp/debug-email.png' }); throw new Error('Campo email ausente'); }
+  if (!ok) { await page.screenshot({ path: '/tmp/debug-email.png' }); throw new Error('Campo email ausente'); }
   await sleep(500); await page.keyboard.press('Enter'); await sleep(6000);
 
+  // Senha
   setStatus('password_step', 'Senha...');
-  let passTyped = false;
   const passSels = ['input[type="password"]', 'input[name="passwd"]', 'input[placeholder*="senha" i]', 'input[placeholder*="password" i]'];
+  ok = false;
   for (const s of passSels) {
-    try { await page.waitForSelector(s, { timeout: 5000 }); await page.click(s); await page.keyboard.type(senha, { delay: 30 }); addLog('Senha: ' + s); passTyped = true; break; } catch(e) {}
+    try { await page.waitForSelector(s, { timeout: 5000 }); await page.click(s); await page.keyboard.type(senha, { delay: 30 }); addLog('Senha: ' + s); ok = true; break; } catch(e) {}
   }
-  if (!passTyped) { await page.screenshot({ path: '/tmp/debug-senha.png' }); throw new Error('Campo senha ausente'); }
+  if (!ok) { await page.screenshot({ path: '/tmp/debug-senha.png' }); throw new Error('Campo senha ausente'); }
   await sleep(500); await page.keyboard.press('Enter'); await sleep(6000);
+  // Stay signed in?
   try { await page.waitForSelector('input[type="submit"], button[value="Yes"], button[value="Sim"]', { timeout: 5000 }); await page.keyboard.press('Enter'); await sleep(3000); } catch(e) {}
 }
+
 
 async function loginOutlook(browser, email, senha) {
   const page = await browser.newPage();
@@ -147,9 +142,9 @@ async function loginOutlook(browser, email, senha) {
   const hasCookies = await loadCookies(page, email);
   addLog(hasCookies ? 'Tem cookies, tentando...' : 'Sem cookies');
 
-  await page.goto('https://outlook.live.com/mail/', { waitUntil: 'load', timeout: 120000 });
+  await page.goto('https://outlook.live.com/mail/', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await sleep(6000);
-  if (await isInbox(page)) { addLog('✅ Logado via cookies!'); return page; }
+  if (await isInbox(page)) { addLog('✅ Logado via cookies!'); await saveCookies(page, email); return page; }
 
   const url = page.url();
   addLog('URL: ' + url.slice(0, 80));
@@ -161,13 +156,24 @@ async function loginOutlook(browser, email, senha) {
     await doLogin(page, email, senha);
   }
 
+  await sleep(3000);
+  addLog('URL apos login: ' + page.url().slice(0, 80));
+  await page.screenshot({ path: '/tmp/debug-after-login.png' });
+
   const newPage = await browser.newPage();
   await newPage.setBypassCSP(true);
-  await newPage.goto('https://outlook.live.com/mail/', { waitUntil: 'load', timeout: 120000 });
-  await sleep(8000);
-  for (let i = 0; i < 4; i++) { if (await isInbox(newPage)) break; await sleep(5000); await newPage.reload({ waitUntil: 'load', timeout: 30000 }); }
-  if (await isInbox(newPage)) { addLog('✅ Login OK!'); await saveCookies(newPage, email); return newPage; }
-  throw new Error('Inbox nao carregou');
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      await newPage.goto('https://outlook.live.com/mail/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await sleep(8000);
+      if (await isInbox(newPage)) { addLog('✅ Login OK! Tentativa ' + (attempt + 1)); await saveCookies(newPage, email); return newPage; }
+      addLog('Tentativa ' + (attempt + 1) + ': nao entrou');
+    } catch(e) { addLog('Erro tentativa ' + (attempt + 1) + ': ' + e.message); }
+  }
+
+  await newPage.screenshot({ path: '/tmp/debug-inbox-fail.png' });
+  throw new Error('Inbox nao carregou apos 6 tentativas');
 }
 
 async function getSubject(page) {
@@ -192,6 +198,7 @@ function matches(svc, subj, body) {
 
 async function findCorrectEmail(page, svc) {
   addLog('--- Buscando: ' + svc.label + ' ---');
+  // Clica Outros
   await page.evaluate(() => { for (const e of document.querySelectorAll('button, span, div[role="button"], a')) { if ((e.innerText || e.textContent || '').trim().toLowerCase() === 'outros') { e.click(); return; } } });
   await sleep(4000);
   const count = await page.evaluate(() => { for (const s of ['div[data-convid]','[role="option"]','[role="listitem"]']) { const i = document.querySelectorAll(s); if (i.length > 0) return i.length; } return 0; });
@@ -262,22 +269,6 @@ async function findNetflixResult(page, svc) {
 }
 
 // ============ API ============
-
-// 🍪 Recarrega cookies
-app.post('/api/cookies/reload', (req, res) => {
-  try { const all = loadAllCookies(); res.json({ ok: true, contas: Object.keys(all).length, emails: Object.keys(all) }); } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-// 🍪 Salva cookies via API
-app.post('/api/cookies/save', (req, res) => {
-  try {
-    const { email, cookies: cookieData } = req.body || {};
-    if (!email || !cookieData) return res.status(400).json({ error: 'email e cookies obrigatorios' });
-    const all = loadAllCookies(); all[email] = { cookies: cookieData, savedAt: new Date().toISOString() }; saveAllCookies(all);
-    res.json({ ok: true, contas: Object.keys(all).length });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
 app.post('/api/logout', (req, res) => {
   try { const e = req.body.email || config.email; const f = getCookieFile(e); if (fs.existsSync(f)) fs.unlinkSync(f); const a = loadAllCookies(); delete a[e]; saveAllCookies(a); res.json({ ok: true }); } catch(ex) { res.status(500).json({ error: ex.message }); }
 });
@@ -320,4 +311,4 @@ app.post('/api/search', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log('BKLOGINS v18 | Porta:', PORT); keepAlive(); });
+app.listen(PORT, () => { console.log('BKLOGINS v17 | Porta:', PORT); keepAlive(); });
