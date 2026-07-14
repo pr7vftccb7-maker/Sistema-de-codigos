@@ -73,6 +73,42 @@ async function backupCookiesToTelegram() {
   } catch(e) {}
 }
 
+// Baixa o all_cookies.json do Telegram ao iniciar (se nao existir local)
+async function restoreCookiesFromTelegram() {
+try {
+if (fs.existsSync(ALL_COOKIES_FILE)) { console.log("[Restore] all_cookies.json ja existe local"); return; }
+console.log("[Restore] Procurando backup no Telegram...");
+const data = await new Promise((resolve, reject) => {
+const req = https.get("https://api.telegram.org/bot" + TG_TOKEN + "/getUpdates?limit=10", (res) => {
+let d = ""; res.on("data", c => d += c); res.on("end", () => { try { resolve(JSON.parse(d)); } catch(e) { resolve(null); } });
+});
+req.on("error", () => resolve(null));
+req.setTimeout(10000, () => { req.destroy(); resolve(null); });
+});
+if (!data || !data.ok || !data.result) return;
+for (const update of data.result.reverse()) {
+const doc = update.message && update.message.document;
+if (!doc || !doc.file_name || doc.file_name !== "all_cookies.json") continue;
+const fileData = await new Promise((resolve) => {
+https.get("https://api.telegram.org/bot" + TG_TOKEN + "/getFile?file_id=" + doc.file_id, (res) => {
+let d = ""; res.on("data", c => d += c); res.on("end", () => { try { const j = JSON.parse(d); resolve(j); } catch(e) { resolve(null); } });
+}).on("error", () => resolve(null));
+});
+if (!fileData || !fileData.result || !fileData.result.file_path) continue;
+const fileUrl = "https://api.telegram.org/file/bot" + TG_TOKEN + "/" + fileData.result.file_path;
+const content = await new Promise((resolve) => {
+https.get(fileUrl, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => resolve(d)); }).on("error", () => resolve(null));
+});
+if (!content) continue;
+try { JSON.parse(content); } catch(e) { continue; }
+fs.writeFileSync(ALL_COOKIES_FILE, content);
+console.log("[Restore] all_cookies.json restaurado do Telegram!");
+return;
+}
+console.log("[Restore] Nenhum backup encontrado no Telegram");
+} catch(e) {}
+}
+
 // ============ COOKIES ============
 function getCookieFile(email) {
   const safe = email.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
@@ -378,5 +414,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('BKLOGINS v17 | Porta:', PORT, '|', isServer() ? 'SERVER' : 'LOCAL');
   console.log('Email:', config.email || '(nao configurado)');
+ restoreCookiesFromTelegram();
   keepAlive();
 });
